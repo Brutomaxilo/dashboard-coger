@@ -1370,7 +1370,7 @@ st.markdown(f"""
 <div style='text-align: center; color: #666; font-size: 14px; padding: 20px;'>
     <p><strong>Dashboard PCI/SC v2.0</strong> - Sistema Avançado de Monitoramento</p>
     <p>📊 Produção • ⏰ Pendências • 📈 Performance • 📋 Gestão</p>
-    <p>Para suporte técnico ou sugestões: victor.poubel@pci.sc.gov.br</strong></p>
+    <p>Para suporte técnico ou sugestões: victor.poubel@policiacientifica.sc.gov.br</strong></p>
     <p><em>Última atualização: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</em></p>
 </div>
 """, unsafe_allow_html=True)
