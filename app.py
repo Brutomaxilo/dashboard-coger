@@ -65,14 +65,16 @@ uploads = {
 }
 
 def resolve_path(name):
-    cands = [
-        f"data/{name}.csv",
-        f"data/{name}.CSV",
-        f"data/{name.replace(' ','_')}.csv",
-        f"data/{name.replace(' ','_')}.CSV",
-    ]
-    for c in cands:
-        if os.path.exists(c): return c
+    # aceita variações: espaço/underscore, maiúsculas e sufixos como " (6).csv"
+    wanted = name.lower().replace(" ", "_")
+    for fname in os.listdir("data"):
+        if not fname.lower().endswith(".csv"):
+            continue
+        base = os.path.splitext(fname)[0].lower()
+        base_norm = base.replace(" ", "_")
+        # bate se começar com o nome esperado
+        if base_norm.startswith(wanted):
+            return os.path.join("data", fname)
     return None
 
 dfs_raw = {}
