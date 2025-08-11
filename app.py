@@ -1374,4 +1374,3 @@ st.markdown(f"""
     <p><em>Última atualização: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</em></p>
 </div>
 """, unsafe_allow_html=True)
-```
