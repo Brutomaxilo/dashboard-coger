@@ -1,192 +1,210 @@
-import io
-import re
-import os
+import io, os, re
 import pandas as pd
 import numpy as np
 import streamlit as st
 import plotly.express as px
 
-st.set_page_config(page_title="PCI/SC – Dashboard Rápido", layout="wide")
+st.set_page_config(page_title="PCI/SC – Dashboard", layout="wide")
+st.title("Dashboard PCI/SC – Produção & Pendências")
 
-st.title("Dashboard Rápido – Produção, Pendências e Séries Temporais")
-
-# =========================
-# AJUDA / ESQUEMA DE DADOS
-# =========================
-with st.expander("Ajuda → Esquema de dados esperado (clique para abrir)"):
-    st.markdown("""
-**Arquivos aceitos** (qualquer subseto):  
-- `Atendimentos_todos_Mensal`  
-- `Laudos_todos_Mensal`  
-- `Atendimentos_especifico_Mensal`  
-- `Laudos_especifico_Mensal`  
-- `laudos_realizados`  
-- `detalhes_laudospendentes`  
-- `detalhes_examespendentes`  
-
-**Colunas recomendadas** (o app tenta detectar automaticamente):  
-- Dimensões: `Diretoria`, `Superintendência` (ou `SR`), `Unidade` (ou `Núcleo`), `Tipo`  
-- Tempo: `Competência`/`AnoMes` **ou** `Data` (o app cria `anomês` = `YYYY-MM`)  
-- Métrica: `Quantidade` (se não existir, assume 1 por linha)
-
-**Dica**: Se precisar padronizar, renomeie no CSV ou ajuste os *aliases* no código (seção "PADRONIZAÇÃO").
-""")
-
-# =========================
-# FUNÇÕES DE I/O
-# =========================
-def read_csv_any(file_or_path):
-    """Lê CSV detectando separador comum; aceita caminho (str) ou UploadedFile."""
-    if file_or_path is None:
-        return None
-    try_list = [",",";","\t","|"]
-    bytes_data = None
-    if not isinstance(file_or_path, str):
-        bytes_data = io.BytesIO(file_or_path.read())
-    for sep in try_list:
+# ============ UTIL ============
+def read_csv_any(path_or_file):
+    if path_or_file is None: return None
+    seps = [",",";","\t","|"]
+    if isinstance(path_or_file, str):
+        for sep in seps:
+            try:
+                df = pd.read_csv(path_or_file, sep=sep, engine="python")
+                if df.shape[1] > 1: return df
+            except: pass
         try:
-            if isinstance(file_or_path, str):
-                df = pd.read_csv(file_or_path, sep=sep, engine="python")
-            else:
-                bytes_data.seek(0)
-                df = pd.read_csv(bytes_data, sep=sep, engine="python")
-            if df.shape[1] > 1:
-                return df
-        except Exception:
-            pass
-    # último recurso
-    try:
-        if isinstance(file_or_path, str):
-            return pd.read_csv(file_or_path, sep=None, engine="python")
-        else:
-            bytes_data.seek(0)
-            return pd.read_csv(bytes_data, sep=None, engine="python")
-    except Exception:
-        return None
+            return pd.read_csv(path_or_file, sep=None, engine="python")
+        except: return None
+    else:
+        bio = io.BytesIO(path_or_file.read())
+        for sep in seps:
+            try:
+                bio.seek(0)
+                df = pd.read_csv(bio, sep=sep, engine="python")
+                if df.shape[1] > 1: return df
+            except: pass
+        try:
+            bio.seek(0)
+            return pd.read_csv(bio, sep=None, engine="python")
+        except: return None
 
-# =========================
-# ENTRADA DE DADOS
-# =========================
+def to_month(dt_series):
+    if dt_series is None: return None
+    d = pd.to_datetime(dt_series, errors="coerce", dayfirst=True, infer_datetime_format=True)
+    if d.notna().any():
+        return d.dt.to_period("M").dt.to_timestamp()
+    return None
+
+def fmt_int(x):
+    try: return f"{int(round(x)):,}".replace(",", ".")
+    except: return "0"
+
+def pct(a,b):
+    return (a/b) if b and b!=0 else None
+
+# ============ DETECÇÃO DE FONTE ============
+has_data_dir = os.path.exists("data") and any(p.endswith(".csv") for p in os.listdir("data"))
+
 st.sidebar.header("Arquivos CSV")
-st.sidebar.caption("Envie os arquivos (pode enviar só os que tiver; o app se adapta).")
+if not has_data_dir:
+    st.sidebar.caption("Envie os arquivos (pode enviar só os que tiver; o app se adapta).")
+
 uploads = {
-    "Atendimentos_todos_Mensal": st.sidebar.file_uploader("Atendimentos_todos_Mensal (.csv)"),
-    "Laudos_todos_Mensal": st.sidebar.file_uploader("Laudos_todos_Mensal (.csv)"),
-    "Atendimentos_especifico_Mensal": st.sidebar.file_uploader("Atendimentos_especifico_Mensal (.csv)"),
-    "Laudos_especifico_Mensal": st.sidebar.file_uploader("Laudos_especifico_Mensal (.csv)"),
-    "laudos_realizados": st.sidebar.file_uploader("laudos_realizados (.csv)"),
-    "detalhes_laudospendentes": st.sidebar.file_uploader("detalhes_laudospendentes (.csv)"),
-    "detalhes_examespendentes": st.sidebar.file_uploader("detalhes_examespendentes (.csv)"),
+    "Atendimentos_todos_Mensal": None if has_data_dir else st.sidebar.file_uploader("Atendimentos_todos_Mensal (.csv)"),
+    "Laudos_todos_Mensal": None if has_data_dir else st.sidebar.file_uploader("Laudos_todos_Mensal (.csv)"),
+    "Atendimentos_especifico_Mensal": None if has_data_dir else st.sidebar.file_uploader("Atendimentos_especifico_Mensal (.csv)"),
+    "Laudos_especifico_Mensal": None if has_data_dir else st.sidebar.file_uploader("Laudos_especifico_Mensal (.csv)"),
+    "laudos_realizados": None if has_data_dir else st.sidebar.file_uploader("laudos_realizados (.csv)"),
+    "detalhes_laudospendentes": None if has_data_dir else st.sidebar.file_uploader("detalhes_laudospendentes (.csv)"),
+    "detalhes_examespendentes": None if has_data_dir else st.sidebar.file_uploader("detalhes_examespendentes (.csv)"),
 }
 
-# Leitura: (1) uploads; (2) fallback para pasta local data/
-dfs = {}
-for name, file in uploads.items():
-    df = read_csv_any(file) if file else None
-    if df is None:
-        # tenta data/<name>.csv com variações simples
-        candidates = [
-            f"data/{name}.csv",
-            f"data/{name}.CSV",
-            f"data/{name.replace(' ', '_')}.csv",
-        ]
-        for c in candidates:
-            if os.path.exists(c):
-                df = read_csv_any(c)
-                if df is not None:
-                    break
-    if df is not None:
-        dfs[name] = df
+def resolve_path(name):
+    cands = [
+        f"data/{name}.csv",
+        f"data/{name}.CSV",
+        f"data/{name.replace(' ','_')}.csv",
+        f"data/{name.replace(' ','_')}.CSV",
+    ]
+    for c in cands:
+        if os.path.exists(c): return c
+    return None
 
-if not dfs:
-    st.warning("Nenhum arquivo carregado ainda. Faça upload pela barra lateral ou coloque seus CSVs em `data/`.")
+dfs_raw = {}
+for name, up in uploads.items():
+    if has_data_dir:
+        p = resolve_path(name)
+        if p: dfs_raw[name] = read_csv_any(p)
+    else:
+        if up: dfs_raw[name] = read_csv_any(up)
+
+if not dfs_raw:
+    st.warning("Nenhum arquivo carregado. Suba pela barra lateral ou coloque os CSVs em `data/`.")
     st.stop()
 
-# =========================
-# PADRONIZAÇÃO
-# =========================
-def normalize_cols(df):
-    df = df.copy()
-    # normaliza nomes
-    df.columns = [re.sub(r"\s+"," ", c.strip()).lower() for c in df.columns]
-    # aliases para mapear colunas comuns
-    aliases = {
-        "diretoria": ["diretoria","dir"],
-        "superintendencia": ["superintendência","superintendencia","sr","superint"],
-        "unidade": ["unidade","nucleo","núcleo","unidade/regional","núcleo regional","nucleo regional"],
-        "tipo": ["tipo","tipologia","classe","natureza"],
-        "quantidade": ["qtd","quantidade","count","total","qtde"],
-        "anomês": ["anomes","ano_mes","competencia","competência","mes_ano","mês/ano","ano-mes"],
-        "data": ["data","dt","data_atendimento","data_laudo","data_emissao","emissao"]
-    }
-    # mapeia: primeira correspondência ganha
-    used_targets = set()
-    for std, cands in aliases.items():
-        for c in cands:
-            if c in df.columns and std not in used_targets:
-                df.rename(columns={c: std}, inplace=True)
-                used_targets.add(std)
-                break
+# ============ MAPEAMENTO FIXO POR ARQUIVO ============
+# Nomes que você enviou (copiados das prints):
+MAPS = {
+    # Pendências
+    "detalhes_laudospendentes": {
+        "date":"data_solicitacao", "ano":"ano_sol", "id":"caso_sirsaelp",
+        "unidade":"unidade", "superintendencia":"superintendencia", "diretoria":"diretoria",
+        "competencia":"competencia", "tipo":"tipopericia", "perito":"perito"
+    },
+    "detalhes_examespendentes": {
+        "date":"data_solicitacao", "ano":"ano_sol", "id":"caso_sirsaelp",
+        "unidade":"unidade", "superintendencia":"superintendencia", "diretoria":"diretoria",
+        "competencia":"competencia", "tipo":"tipopericia"
+    },
+    # Mensal – todos / específico
+    "Atendimentos_todos_Mensal": {
+        "date":"data_interesse", "id":"idatendimento"
+    },
+    "Atendimentos_especifico_Mensal": {
+        "date":"data_interesse", "competencia":"txcompetencia", "id":"idatendimento"
+    },
+    "Laudos_todos_Mensal": {
+        "date":"data_interesse", "id":"iddocumento"
+    },
+    "Laudos_especifico_Mensal": {
+        "date":"data_interesse", "competencia":"txcompetencia", "id":"iddocumento"
+    },
+    # Realizados
+    "laudos_realizados": {
+        "solicitacao":"dhsolicitacao", "atendimento":"dhatendimento", "emissao":"dhemitido",
+        "n_laudo":"n_laudo", "ano":"ano_emissao", "mes":"mes_emissao",
+        "unidade":"unidade_emissao", "diretoria":"diretoria",
+        "competencia":"txcompetencia", "tipo":"txtipopericia", "perito":"perito"
+    },
+}
 
-    # cria anomês a partir de data se necessário
-    if "anomês" not in df.columns:
-        if "data" in df.columns:
-            d = pd.to_datetime(df["data"], errors="coerce", dayfirst=True, infer_datetime_format=True)
-            df["anomês"] = d.dt.strftime("%Y-%m")
-        else:
-            # tenta qualquer coluna que pareça competência
-            for c in df.columns:
-                if re.search(r"(comp|mes|mês|ano)", c):
-                    tmp = df[c].astype(str)
-                    parsed = pd.to_datetime(tmp, errors="coerce", dayfirst=True, infer_datetime_format=True)
-                    if parsed.notna().mean() > 0.3:
-                        df["anomês"] = parsed.dt.strftime("%Y-%m")
-                        break
+def standardize(name, df):
+    """Padroniza para colunas: anomês_dt, anomês, quantidade, diretoria, superintendencia, unidade, tipo, id, perito, data_base"""
+    m = MAPS.get(name, {})
+    out = df.copy()
+    # quant
+    out["quantidade"] = 1
 
-    # garante quantidade
-    if "quantidade" not in df.columns:
-        df["quantidade"] = 1
+    # dimensões diretas (se existirem)
+    for std, src in [("diretoria","diretoria"), ("superintendencia","superintendencia"), ("unidade","unidade"),
+                     ("tipo","tipo"), ("perito","perito"), ("id","id")]:
+        if src in m and m[src] in out.columns:
+            out[std] = out[m[src]]
 
-    # limpa espaços / padroniza strings
-    for c in ["diretoria","superintendencia","unidade","tipo","anomês"]:
-        if c in df.columns:
-            df[c] = df[c].astype(str).str.strip()
+    # ANOMÊS: prioridade por competencia -> date
+    anomes_dt = None
+    if "competencia" in m and m["competencia"] in out.columns:
+        anomes_dt = to_month(out[m["competencia"]])
+    if anomes_dt is None and "date" in m and m["date"] in out.columns:
+        anomes_dt = to_month(out[m["date"]])
+    # ano/mes (apenas em laudos_realizados)
+    if anomes_dt is None and name == "laudos_realizados":
+        if ("ano" in m and m["ano"] in out.columns) and ("mes" in m and m["mes"] in out.columns):
+            y = pd.to_numeric(out[m["ano"]], errors="coerce")
+            mo = pd.to_numeric(out[m["mes"]], errors="coerce")
+            tmp = pd.to_datetime(dict(year=y, month=mo, day=1), errors="coerce")
+            if tmp.notna().any():
+                anomes_dt = tmp.dt.to_period("M").dt.to_timestamp()
 
-    return df
+    if anomes_dt is not None:
+        out["anomês_dt"] = anomes_dt
+        out["anomês"] = out["anomês_dt"].dt.strftime("%Y-%m")
 
-for k in list(dfs.keys()):
-    dfs[k] = normalize_cols(dfs[k])
+    # datas base brutas úteis
+    if "date" in m and m["date"] in out.columns:
+        out["data_base"] = pd.to_datetime(out[m["date"]], errors="coerce", dayfirst=True, infer_datetime_format=True)
 
-# =========================
-# PREPARAÇÃO E FILTROS
-# =========================
-def unique_values(cols):
-    vals = {}
-    for c in ["diretoria","superintendencia","unidade","tipo","anomês"]:
-        acc = set()
-        for df in dfs.values():
-            if df is not None and c in df.columns:
-                acc |= set(df[c].dropna().astype(str).unique())
-        if acc:
-            vals[c] = sorted([v for v in acc if v and v.lower()!="nan"])
-    return vals
+    # métricas especiais (laudos_realizados)
+    if name == "laudos_realizados":
+        for k,std in [("solicitacao","dhsolicitacao"),("atendimento","dhatendimento"),("emissao","dhemitido")]:
+            if k in m and m[k] in out.columns:
+                out[std] = pd.to_datetime(out[m[k]], errors="coerce", dayfirst=True, infer_datetime_format=True)
+        # TME: emissão - atendimento (fallback emissão - solicitação)
+        if "dhemitido" in out.columns:
+            base = out["dhatendimento"] if "dhatendimento" in out.columns else out.get("dhsolicitacao")
+            out["tme_dias"] = (out["dhemitido"] - base).dt.days
+            out["sla_30_ok"] = out["tme_dias"] <= 30
 
-vals = unique_values(dfs)
+    # limpeza básica
+    for c in ["diretoria","superintendencia","unidade","tipo","id","perito","anomês"]:
+        if c in out.columns:
+            out[c] = out[c].astype(str).str.strip()
+    return out
+
+dfs = {}
+for name, df in dfs_raw.items():
+    if df is None: continue
+    # normaliza nomes originais (minúsculo, sem espaços duplicados)
+    df.columns = [re.sub(r"\s+"," ", c.strip().lower()) for c in df.columns]
+    dfs[name] = standardize(name, df)
+
+# ============ FILTROS ============
+def collect_values(col):
+    vals = set()
+    for df in dfs.values():
+        if col in df.columns:
+            vals |= set(df[col].dropna().astype(str))
+    vals = [v for v in vals if v and v.lower()!="nan"]
+    return sorted(vals)
 
 st.sidebar.subheader("Filtros")
-f_diretoria = st.sidebar.multiselect("Diretoria", vals.get("diretoria", []))
-f_sr        = st.sidebar.multiselect("Superintendência", vals.get("superintendencia", []))
-f_unid      = st.sidebar.multiselect("Unidade / Núcleo", vals.get("unidade", []))
-f_tipo      = st.sidebar.multiselect("Tipo", vals.get("tipo", []))
-f_comp      = st.sidebar.multiselect("Competência (Ano-Mês)", vals.get("anomês", []))
+f_diretoria = st.sidebar.multiselect("Diretoria", collect_values("diretoria"))
+f_sr        = st.sidebar.multiselect("Superintendência", collect_values("superintendencia"))
+f_unid      = st.sidebar.multiselect("Unidade / Núcleo", collect_values("unidade"))
+f_tipo      = st.sidebar.multiselect("Tipo", collect_values("tipo"))
+f_comp      = st.sidebar.multiselect("Competência (Ano-Mês)", collect_values("anomês"))
 
 def apply_filters(df):
-    if df is None: return df
-    m = pd.Series([True]*len(df), index=df.index)
+    if df is None: return None
+    m = pd.Series(True, index=df.index)
     def fcol(col, flt):
         nonlocal m
-        if col in df.columns and flt:
-            m &= df[col].astype(str).isin(flt)
+        if col in df.columns and flt: m &= df[col].astype(str).isin(flt)
     fcol("diretoria", f_diretoria)
     fcol("superintendencia", f_sr)
     fcol("unidade", f_unid)
@@ -194,125 +212,139 @@ def apply_filters(df):
     fcol("anomês", f_comp)
     return df[m].copy()
 
-# bases principais
+# bases filtradas
 at_todos = apply_filters(dfs.get("Atendimentos_todos_Mensal"))
 la_todos = apply_filters(dfs.get("Laudos_todos_Mensal"))
-at_esp  = apply_filters(dfs.get("Atendimentos_especifico_Mensal"))
-la_esp  = apply_filters(dfs.get("Laudos_especifico_Mensal"))
-la_real = apply_filters(dfs.get("laudos_realizados"))
-pend_l  = apply_filters(dfs.get("detalhes_laudospendentes"))
-pend_e  = apply_filters(dfs.get("detalhes_examespendentes"))
+at_esp   = apply_filters(dfs.get("Atendimentos_especifico_Mensal"))
+la_esp   = apply_filters(dfs.get("Laudos_especifico_Mensal"))
+la_real  = apply_filters(dfs.get("laudos_realizados"))
+pend_l   = apply_filters(dfs.get("detalhes_laudospendentes"))
+pend_e   = apply_filters(dfs.get("detalhes_examespendentes"))
 
-# =========================
-# KPIs
-# =========================
-def k(x):
-    try:
-        return int(x) if pd.notna(x) else 0
-    except Exception:
-        return 0
+# ============ KPIs ============
+def soma_q(df): 
+    return int(df["quantidade"].sum()) if df is not None and "quantidade" in df.columns else 0
 
-tot_at = k(at_todos["quantidade"].sum()) if at_todos is not None else 0
-tot_la = k(la_todos["quantidade"].sum()) if la_todos is not None else 0
-tot_pendl = int(pend_l.shape[0]) if pend_l is not None else 0
-tot_pende = int(pend_e.shape[0]) if pend_e is not None else 0
+tot_at = soma_q(at_todos)
+tot_la = soma_q(la_todos)
+tot_pendl = len(pend_l) if pend_l is not None else 0
+tot_pende = len(pend_e) if pend_e is not None else 0
 
-# cálculo de backlog e taxa de atendimento (se possível)
-backlog = None
-taxa_atendimento = None
-if la_todos is not None and "anomês" in la_todos.columns:
-    med_mensal_la = la_todos.groupby("anomês")["quantidade"].sum().mean()
-    if (pend_l is not None):
-        backlog = tot_pendl / med_mensal_la if med_mensal_la and med_mensal_la > 0 else None
-if at_todos is not None and la_todos is not None:
-    soma_at = at_todos["quantidade"].sum()
-    soma_la = la_todos["quantidade"].sum()
-    taxa_atendimento = (soma_la / soma_at) if soma_at > 0 else None
+# média mensal de laudos (para backlog)
+def media_mensal(df):
+    if df is None or "anomês_dt" not in df.columns: return None
+    g = df.groupby("anomês_dt")["quantidade"].sum()
+    return g.mean() if len(g)>0 else None
 
-col1, col2, col3, col4, col5, col6 = st.columns(6)
-col1.metric("Atendimentos (período filtrado)", f"{tot_at:,}".replace(",", "."))
-col2.metric("Laudos (período filtrado)", f"{tot_la:,}".replace(",", "."))
-col3.metric("Laudos pendentes", f"{tot_pendl:,}".replace(",", "."))
-col4.metric("Exames pendentes", f"{tot_pende:,}".replace(",", "."))
-col5.metric("Backlog (meses)", f"{backlog:.1f}" if backlog is not None else "—")
-col6.metric("Taxa de atendimento", f"{taxa_atendimento*100:.1f}%" if taxa_atendimento is not None else "—")
+med_la = media_mensal(la_todos)
+backlog = (tot_pendl / med_la) if med_la and med_la>0 else None
+taxa_at = pct(tot_la, tot_at)
+
+# TME & SLA 30 (laudos_realizados)
+tme_med = None
+sla30 = None
+if la_real is not None and "tme_dias" in la_real.columns:
+    tme_med = float(pd.to_numeric(la_real["tme_dias"], errors="coerce").dropna().median()) if la_real["tme_dias"].notna().any() else None
+    if "sla_30_ok" in la_real.columns and la_real["sla_30_ok"].notna().any():
+        sla30 = la_real["sla_30_ok"].mean()
+
+k1,k2,k3,k4,k5,k6,k7,k8 = st.columns(8)
+k1.metric("Atendimentos", fmt_int(tot_at))
+k2.metric("Laudos", fmt_int(tot_la))
+k3.metric("Laudos pendentes", fmt_int(tot_pendl))
+k4.metric("Exames pendentes", fmt_int(tot_pende))
+k5.metric("Backlog (meses)", f"{backlog:.1f}" if backlog is not None else "—")
+k6.metric("Taxa de atendimento", f"{taxa_at*100:.1f}%" if taxa_at is not None else "—")
+k7.metric("TME (dias)", f"{tme_med:.1f}" if tme_med is not None else "—")
+k8.metric("SLA 30d", f"{sla30*100:.1f}%" if sla30 is not None else "—")
 
 st.divider()
 
-# =========================
-# VISÕES
-# =========================
-tab1, tab2, tab3, tab4 = st.tabs(["Séries Temporais", "Comparativos", "Pendências", "Dados Brutos"])
+# ============ ABAS ============
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Visão Geral","Tendências","Rankings","Pendências","Dados"])
 
-# --- Séries temporais
+# Visão Geral
 with tab1:
-    st.subheader("Séries temporais por competência (Ano-Mês)")
-    def plot_series(df, label):
-        if df is None or "anomês" not in df.columns or "quantidade" not in df.columns:
-            st.info(f"Sem dados suficientes para {label}.")
-            return
-        g = df.groupby("anomês", as_index=False)["quantidade"].sum().sort_values("anomês")
-        fig = px.line(g, x="anomês", y="quantidade", markers=True, title=label)
-        fig.update_layout(margin=dict(l=10,r=10,t=40,b=10), height=380)
-        st.plotly_chart(fig, use_container_width=True)
+    st.subheader("Resumo")
+    if la_todos is not None and "unidade" in la_todos.columns:
+        g = la_todos.groupby("unidade", as_index=False)["quantidade"].sum().sort_values("quantidade", ascending=False).head(10)
+        st.plotly_chart(px.bar(g, x="quantidade", y="unidade", orientation="h", title="Top 10 Unidades – Laudos"), use_container_width=True)
+    if la_todos is not None and "tipo" in la_todos.columns:
+        g = la_todos.groupby("tipo", as_index=False)["quantidade"].sum().sort_values("quantidade", ascending=False).head(12)
+        st.plotly_chart(px.bar(g, x="tipo", y="quantidade", title="Tipos de Laudo – Top 12"), use_container_width=True)
 
-    c1, c2 = st.columns(2)
-    with c1:
-        plot_series(at_todos, "Atendimentos – Todos (mensal)")
-    with c2:
-        plot_series(la_todos, "Laudos – Todos (mensal)")
+# Tendências
+def line_series(df, title):
+    if df is None or "anomês_dt" not in df.columns: 
+        st.info(f"Sem dados suficientes para {title}."); return
+    g = df.groupby("anomês_dt", as_index=False)["quantidade"].sum().sort_values("anomês_dt")
+    g["anomês"] = g["anomês_dt"].dt.strftime("%Y-%m")
+    fig = px.line(g, x="anomês", y="quantidade", markers=True, title=title)
+    fig.update_layout(margin=dict(l=10,r=10,t=40,b=10), height=380)
+    st.plotly_chart(fig, use_container_width=True)
 
-    c3, c4 = st.columns(2)
-    with c3:
-        plot_series(at_esp, "Atendimentos – Específico (mensal)")
-    with c4:
-        plot_series(la_esp, "Laudos – Específico (mensal)")
-
-# --- Comparativos
 with tab2:
-    st.subheader("Comparativos por Diretoria / Unidade / Tipo")
-    def bar_dim(df, dim, title):
-        if df is None or dim not in df.columns:
-            st.info(f"Sem {dim} para {title}.")
-            return
-        g = df.groupby(dim, as_index=False)["quantidade"].sum().sort_values("quantidade", ascending=False).head(25)
-        fig = px.bar(g, x="quantidade", y=dim, orientation="h", title=title)
-        fig.update_layout(margin=dict(l=10,r=10,t=40,b=10), height=500)
-        st.plotly_chart(fig, use_container_width=True)
+    st.subheader("Séries temporais")
+    c1,c2 = st.columns(2)
+    with c1: line_series(at_todos, "Atendimentos – Todos (mensal)")
+    with c2: line_series(la_todos, "Laudos – Todos (mensal)")
+    c3,c4 = st.columns(2)
+    with c3: line_series(at_esp, "Atendimentos – Específico (mensal)")
+    with c4: line_series(la_esp, "Laudos – Específico (mensal)")
 
-    c1, c2 = st.columns(2)
-    with c1:
-        bar_dim(at_todos, "diretoria", "Atendimentos por Diretoria")
-    with c2:
-        bar_dim(la_todos, "diretoria", "Laudos por Diretoria")
+# Rankings
+def bar_dim(df, dim, title, topn=25):
+    if df is None or dim not in df.columns:
+        st.info(f"Sem {dim} para {title}."); return
+    g = df.groupby(dim, as_index=False)["quantidade"].sum().sort_values("quantidade", ascending=False).head(topn)
+    fig = px.bar(g, x="quantidade", y=dim, orientation="h", title=title)
+    fig.update_layout(margin=dict(l=10,r=10,t=40,b=10), height=520)
+    st.plotly_chart(fig, use_container_width=True)
 
-    c3, c4 = st.columns(2)
-    with c3:
-        bar_dim(la_todos, "unidade", "Laudos por Unidade")
-    with c4:
-        bar_dim(at_todos, "unidade", "Atendimentos por Unidade")
-
+with tab3:
+    st.subheader("Comparativos")
+    c1,c2 = st.columns(2)
+    with c1: bar_dim(at_todos, "diretoria", "Atendimentos por Diretoria")
+    with c2: bar_dim(la_todos, "diretoria", "Laudos por Diretoria")
+    c3,c4 = st.columns(2)
+    with c3: bar_dim(la_todos, "unidade", "Laudos por Unidade")
+    with c4: bar_dim(at_todos, "unidade", "Atendimentos por Unidade")
     bar_dim(la_todos, "tipo", "Laudos por Tipo")
 
-# --- Pendências
-with tab3:
-    st.subheader("Pendências – Laudos e Exames")
-    if pend_l is not None:
-        st.markdown("**Laudos Pendentes**")
-        st.dataframe(pend_l, use_container_width=True, height=320)
-    else:
-        st.info("Sem base de laudos pendentes.")
-    if pend_e is not None:
-        st.markdown("**Exames Pendentes**")
-        st.dataframe(pend_e, use_container_width=True, height=320)
-    else:
-        st.info("Sem base de exames pendentes.")
+# Pendências (inclui aging se houver data_solicitacao)
+def add_aging(df, colname="data_base"):
+    if df is None or colname not in df.columns: return df, None
+    d = pd.to_datetime(df[colname], errors="coerce", dayfirst=True, infer_datetime_format=True)
+    dias = (pd.Timestamp("now").normalize() - d).dt.days
+    buckets = pd.cut(dias, bins=[-1,30,60,90,180,10**5],
+                     labels=["0–30","31–60","61–90","91–180","180+"])
+    out = df.copy()
+    out["dias_pendentes"] = dias
+    out["faixa_dias"] = buckets
+    dist = out["faixa_dias"].value_counts(dropna=False).sort_index()
+    return out, dist
 
-# --- Dados brutos
 with tab4:
-    st.subheader("Dados brutos (primeiras linhas)")
-    for name, df in dfs.items():
-        st.markdown(f"**{name}**")
-        st.dataframe(df.head(50), use_container_width=True, height=250)
+    st.subheader("Pendências")
+    c1,c2 = st.columns(2)
+    with c1:
+        if pend_l is not None:
+            p2, dist = add_aging(pend_l, "data_base" if "data_base" in pend_l.columns else "data_solicitacao")
+            if dist is not None: st.bar_chart(dist)
+            st.dataframe(p2.head(500), use_container_width=True, height=320)
+        else:
+            st.info("Sem base de laudos pendentes.")
+    with c2:
+        if pend_e is not None:
+            p3, dist2 = add_aging(pend_e, "data_base" if "data_base" in pend_e.columns else "data_solicitacao")
+            if dist2 is not None: st.bar_chart(dist2)
+            st.dataframe(p3.head(500), use_container_width=True, height=320)
+        else:
+            st.info("Sem base de exames pendentes.")
 
-st.caption("Obs.: O app detecta nomes de colunas (Diretoria, Superintendência, Unidade, Tipo, AnoMês/Data, Quantidade). Se o seu layout divergir, renomeie as colunas nos CSVs ou ajuste o dicionário de aliases na seção PADRONIZAÇÃO.")
+# Dados
+with tab5:
+    st.subheader("Dados brutos")
+    for name, df in dfs.items():
+        st.markdown(f"**{name}** — {df.shape[0]} linhas / {df.shape[1]} colunas")
+        st.dataframe(df.head(50), use_container_width=True, height=250)
