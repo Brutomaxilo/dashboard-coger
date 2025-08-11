@@ -1,6 +1,3 @@
-Segue o script **completo, revisado e já com a análise diária** integrada. É só **substituir** o seu `app.py` por este conteúdo.
-
-```python
 import io
 import os
 import re
