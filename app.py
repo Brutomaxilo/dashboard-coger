@@ -17,9 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-
 # ============ CONFIGURAÇÃO INICIAL ============
-# === PRO UI: Tema Plotly, CSS e utilitários ===
 px.defaults.template = "plotly_white"
 px.defaults.width = None
 px.defaults.height = 400
@@ -56,12 +54,11 @@ with colh1:
 with colh2:
     st.markdown(f"""
     <div style="display:flex; gap:8px; justify-content:flex-end;">
-      <div class="kpi-card" style="padding:8px 10px;"><span class="kpi-title">Versão</span><div class="kpi-value" style="font-size:16px;">2.1</div></div>
+      <div class="kpi-card" style="padding:8px 10px;"><span class="kpi-title">Versão</span><div class="kpi-value" style="font-size:16px;">2.2</div></div>
       <div class="kpi-card" style="padding:8px 10px;"><span class="kpi-title">Atualizado</span><div class="kpi-value" style="font-size:16px;">{datetime.now().strftime("%d/%m/%Y %H:%M")}</div></div>
     </div>
     """, unsafe_allow_html=True)
 st.markdown("<hr/>", unsafe_allow_html=True)
-
 
 # ============ CACHE E PERFORMANCE ============
 @st.cache_data
@@ -105,7 +102,7 @@ def process_datetime_column(series: pd.Series, dayfirst: bool = True) -> Optiona
     dt_series = pd.to_datetime(series, errors="coerce", dayfirst=dayfirst, infer_datetime_format=True)
 
     if dt_series.isna().sum() > len(dt_series) * 0.5:
-        for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y"]:
+        for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"]:
             try:
                 dt_series = pd.to_datetime(series, format=fmt, errors="coerce")
                 if dt_series.notna().sum() > len(dt_series) * 0.5:
@@ -132,14 +129,6 @@ def calculate_percentage(numerator: float, denominator: float) -> Optional[float
     if pd.isna(numerator) or pd.isna(denominator) or denominator == 0:
         return None
     return (numerator / denominator) * 100
-
-def get_period_filter_options(df: pd.DataFrame) -> List[str]:
-    if df is None or "anomês_dt" not in df.columns:
-        return []
-    dates = df["anomês_dt"].dropna()
-    if dates.empty:
-        return []
-    return ["Últimos 3 meses", "Últimos 6 meses", "Último ano", "Ano atual", "Todo o período"]
 
 # ============ DETECÇÃO DE ARQUIVOS ============
 @st.cache_data
@@ -190,11 +179,7 @@ file_configs = {
         "label": "Exames Pendentes",
         "description": "Exames aguardando realização com aging",
         "pattern": ["examespendentes", "exames_pendentes", "detalhes_examespendentes"]
-    }
-}
-
-# +++ NOVOS DATASETS DIÁRIOS +++
-file_configs.update({
+    },
     "Atendimentos_diario": {
         "label": "Atendimentos (Diário)",
         "description": "Registros de atendimentos em granularidade diária",
@@ -205,7 +190,7 @@ file_configs.update({
         "description": "Registros de laudos em granularidade diária",
         "pattern": ["laudos_diario", "laudos_diário", "laudos diário"]
     }
-})
+}
 
 uploads = {}
 for key, config in file_configs.items():
@@ -306,7 +291,7 @@ def load_all_data(file_sources: Dict) -> Dict[str, pd.DataFrame]:
                     st.sidebar.error(f"❌ Erro ao processar {name}: {str(e)}")
 
         if df is not None:
-            df.columns = [re.sub(r"\s+", " ", col.strip().lower()) for col in df.columns]
+            df.columns = [col.strip() for col in df.columns]
             loaded_data[name] = df
 
     if "laudos_realizados" not in loaded_data:
@@ -316,7 +301,6 @@ def load_all_data(file_sources: Dict) -> Dict[str, pd.DataFrame]:
     return loaded_data
 
 # Carrega os dados
-# Spinner de carregamento
 with st.spinner("Carregando e padronizando dados..."):
     raw_dataframes = load_all_data(uploads)
 
@@ -325,188 +309,317 @@ if not raw_dataframes:
     st.info("📝 **Arquivos esperados:** " + ", ".join(file_configs.keys()))
     st.stop()
 
-# ============ MAPEAMENTO DE COLUNAS ============
-COLUMN_MAPPINGS = {
-    "detalhes_laudospendentes": {
-        "date": "data_solicitacao",
-        "ano": "ano_sol",
-        "id": "caso_sirsaelp",
-        "unidade": "unidade",
-        "superintendencia": "superintendencia",
-        "diretoria": "diretoria",
-        "competencia": "competencia",
-        "tipo": "tipopericia",
-        "perito": "perito"
-    },
-    "detalhes_examespendentes": {
-        "date": "data_solicitacao",
-        "ano": "ano_sol",
-        "id": "caso_sirsaelp",
-        "unidade": "unidade",
-        "superintendencia": "superintendencia",
-        "diretoria": "diretoria",
-        "competencia": "competencia",
-        "tipo": "tipopericia"
-    },
-    "Atendimentos_todos_Mensal": {
-        "date": "data_interesse",
-        "id": "idatendimento",
-        "quantidade": "idatendimento"
-    },
-    "Atendimentos_especifico_Mensal": {
-        "date": "data_interesse",
-        "competencia": "txcompetencia",
-        "id": "idatendimento",
-        "quantidade": "idatendimento",
-        "tipo": "txcompetencia"
-    },
-    "Laudos_todos_Mensal": {
-        "date": "data_interesse",
-        "id": "iddocumento",
-        "quantidade": "iddocumento"
-    },
-    "Laudos_especifico_Mensal": {
-        "date": "data_interesse",
-        "competencia": "txcompetencia",
-        "id": "iddocumento",
-        "quantidade": "iddocumento",
-        "tipo": "txcompetencia"
-    },
-    "laudos_realizados": {
-        "solicitacao": "dhsolicitacao",
-        "atendimento": "dhatendimento",
-        "emissao": "dhemitido",
-        "n_laudo": "n_laudo",
-        "ano": "ano_emissao",
-        "mes": "mes_emissao",
-        "unidade": "unidade_emissao",
-        "diretoria": "diretoria",
-        "competencia": "txcompetencia",
-        "tipo": "txtipopericia",
-        "perito": "perito"
-    }
-}
-
-# +++ NOVOS MAPEAMENTOS DIÁRIOS +++
-COLUMN_MAPPINGS.update({
-    "Atendimentos_diario": {
-        "date": "data_interesse",
-        "id": "idatendimento",
-        "quantidade": "idatendimento"
-    },
-    "Laudos_diario": {
-        "date": "data_interesse",
-        "id": "iddocumento",
-        "quantidade": "iddocumento"
-    }
-})
-
 # ============ PADRONIZAÇÃO DE DADOS ============
 @st.cache_data
 def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
-    """Padroniza estrutura do DataFrame para análise unificada."""
+    """Padroniza estrutura do DataFrame para análise unificada - CORRIGIDO."""
     if df is None or df.empty:
         return pd.DataFrame()
 
-    mapping = COLUMN_MAPPINGS.get(name, {})
     result = df.copy()
-
-    # Quantidade
+    
+    # ===== CORREÇÃO PRINCIPAL: Tratar os valores como TOTAIS, não IDs =====
+    
+    # Para datasets mensais e diários, os valores nas colunas idatendimento/iddocumento
+    # representam TOTAIS AGREGADOS, não IDs individuais
     if name in ["Atendimentos_todos_Mensal", "Laudos_todos_Mensal",
                 "Atendimentos_especifico_Mensal", "Laudos_especifico_Mensal",
                 "Atendimentos_diario", "Laudos_diario"]:
-        quantity_col = mapping.get("quantidade", mapping.get("id"))
-        if quantity_col and quantity_col in result.columns:
-            result["quantidade"] = pd.to_numeric(result[quantity_col], errors="coerce").fillna(1)
+        
+        # Identificar a coluna de quantidade correta
+        if "idatendimento" in result.columns:
+            result["quantidade"] = pd.to_numeric(result["idatendimento"], errors="coerce").fillna(0)
+        elif "iddocumento" in result.columns:
+            result["quantidade"] = pd.to_numeric(result["iddocumento"], errors="coerce").fillna(0)
         else:
             result["quantidade"] = 1
+            
+        # Para datasets específicos, manter também a informação do tipo
+        if "txcompetencia" in result.columns:
+            result["tipo"] = result["txcompetencia"]
+            
     else:
+        # Para outros datasets (pendências, laudos realizados), cada linha é um registro
         result["quantidade"] = 1
 
-    # Dimensões
-    for dim_col in ["diretoria", "superintendencia", "unidade", "tipo", "perito", "id"]:
-        if dim_col in mapping and mapping[dim_col] in result.columns:
-            result[dim_col] = result[mapping[dim_col]]
-
-    # Fallbacks inteligentes de data-base (nível diário)
-    fallback_date_candidates = [
-        "dhemitido", "dhatendimento", "dhsolicitacao", "data_emissao",
-        "data_interesse", "data", "dia", "data_base"
-    ]
-    mapped_date_col = mapping.get("date")
+    # ===== PROCESSAMENTO DE DATAS =====
+    
+    # Identificar coluna de data principal
+    date_columns = ["data_interesse", "data_solicitacao", "dhemitido", "dhatendimento", "dhsolicitacao"]
     chosen_date_col = None
-    if mapped_date_col and mapped_date_col in result.columns:
-        chosen_date_col = mapped_date_col
-    else:
-        for c in fallback_date_candidates:
-            if c in result.columns:
-                chosen_date_col = c
-                break
+    
+    for col in date_columns:
+        if col in result.columns:
+            chosen_date_col = col
+            break
+    
     if chosen_date_col:
         result["data_base"] = process_datetime_column(result[chosen_date_col])
-
-    # Competência / mês
-    anomes_dt = None
-    if "competencia" in mapping and mapping["competencia"] in result.columns:
-        if mapping["competencia"] == "txcompetencia":
-            date_col = mapping.get("date")
-            if date_col and date_col in result.columns:
-                date_series = process_datetime_column(result[date_col])
-                if date_series is not None:
-                    anomes_dt = date_series.dt.to_period("M").dt.to_timestamp()
+        
+        # Para dados mensais, usar o primeiro dia do mês
+        if "mensal" in name.lower() or chosen_date_col == "data_interesse":
+            if result["data_base"].notna().any():
+                result["anomês_dt"] = result["data_base"].dt.to_period("M").dt.to_timestamp()
         else:
-            anomes_dt = process_datetime_column(result[mapping["competencia"]])
-            if anomes_dt is not None:
-                anomes_dt = anomes_dt.dt.to_period("M").dt.to_timestamp()
+            # Para dados diários, manter a data original
+            result["dia"] = result["data_base"].dt.normalize()
+            if result["data_base"].notna().any():
+                result["anomês_dt"] = result["data_base"].dt.to_period("M").dt.to_timestamp()
 
-    if anomes_dt is None and "date" in mapping and mapping["date"] in result.columns:
-        date_col = process_datetime_column(result[mapping["date"]])
-        if date_col is not None:
-            anomes_dt = date_col.dt.to_period("M").dt.to_timestamp()
+    # ===== DIMENSÕES PADRÃO =====
+    
+    # Mapear colunas de dimensões
+    dimension_mapping = {
+        "caso_sirsaelp": "id",
+        "unidade": "unidade", 
+        "superintendencia": "superintendencia",
+        "diretoria": "diretoria",
+        "tipopericia": "tipo",
+        "competencia": "tipo",
+        "perito": "perito"
+    }
+    
+    for original_col, standard_col in dimension_mapping.items():
+        if original_col in result.columns and standard_col not in result.columns:
+            result[standard_col] = result[original_col]
 
-    # Para laudos_realizados usar ano/mes se existir
-    if anomes_dt is None and name == "laudos_realizados":
-        ano_col = mapping.get("ano")
-        mes_col = mapping.get("mes")
-        if ano_col in result.columns and mes_col in result.columns:
-            try:
-                anos = pd.to_numeric(result[ano_col], errors="coerce")
-                meses = pd.to_numeric(result[mes_col], errors="coerce")
-                valid_mask = (~anos.isna()) & (~meses.isna()) & (meses >= 1) & (meses <= 12)
-                if valid_mask.any():
-                    dates = pd.to_datetime({'year': anos, 'month': meses, 'day': 1}, errors="coerce")
-                    anomes_dt = dates.dt.to_period("M").dt.to_timestamp()
-            except Exception:
-                pass
+    # ===== PROCESSAMENTO ESPECÍFICO LAUDOS REALIZADOS =====
+    
+    if name == "laudos_realizados":
+        for field in ["solicitacao", "atendimento", "emissao"]:
+            col_down1, col_down2 = st.columns(2)
+            with col_down1:
+                csv_data = df_display.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Dados Filtrados (CSV)",
+                    data=csv_data,
+                    file_name=f"{selected_dataset}_filtrado_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            with col_down2:
+                csv_complete = df_selected.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Dataset Completo (CSV)",
+                    data=csv_complete,
+                    file_name=f"{selected_dataset}_completo_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
 
-    if anomes_dt is not None:
-        result["anomês_dt"] = anomes_dt
+# ============ ABA 6: RELATÓRIOS ============
+with tab6:
+    st.subheader("📑 Relatórios Executivos")
+    tipo_relatorio = st.selectbox(
+        "Tipo de Relatório:",
+        ["Relatório Executivo Completo", "Relatório de Produção", "Relatório de Pendências", "Relatório de Performance", "Relatório Comparativo"]
+    )
+
+    def gerar_relatorio_executivo() -> str:
+        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        relatorio = f"""
+# RELATÓRIO EXECUTIVO PCI/SC
+**Data de Geração:** {timestamp}
+**Período de Análise:** {filter_periodo}
+
+## 📊 RESUMO EXECUTIVO
+- **Atendimentos Totais:** {format_number(total_atendimentos)}
+- **Laudos Emitidos:** {format_number(total_laudos)}
+- **Taxa de Conversão:** {format_number(taxa_atendimento, 1) if taxa_atendimento else 'N/A'}%
+- **Produtividade Mensal:** {format_number(media_mensal_laudos, 1) if media_mensal_laudos else 'N/A'} laudos/mês
+
+## ⏰ GESTÃO DE PENDÊNCIAS
+- **Laudos Pendentes:** {format_number(total_pend_laudos)}
+- **Exames Pendentes:** {format_number(total_pend_exames)}
+- **Backlog Estimado:** {format_number(backlog_meses, 1) if backlog_meses else 'N/A'} meses
+- **Aging Médio:** {format_number(aging_laudos_medio or aging_exames_medio, 0) if (aging_laudos_medio or aging_exames_medio) else 'N/A'} dias
+
+## 🎯 PERFORMANCE OPERACIONAL
+- **TME Mediano:** {format_number(tme_mediano, 1) if tme_mediano else 'N/A'} dias
+- **SLA 30 dias:** {format_number(sla_30_percent, 1) if sla_30_percent else 'N/A'}%
+- **SLA 60 dias:** {format_number(sla_60_percent, 1) if sla_60_percent else 'N/A'}%
+
+## 📈 TENDÊNCIAS
+"""
+        if crescimento_laudos is not None:
+            if crescimento_laudos > 5:
+                relatorio += f"- **Crescimento Positivo:** Laudos cresceram {format_number(crescimento_laudos, 1)}% no período\n"
+            elif crescimento_laudos < -5:
+                relatorio += f"- **Alerta:** Laudos decresceram {format_number(abs(crescimento_laudos), 1)}% no período\n"
+            else:
+                relatorio += f"- **Estabilidade:** Variação de {format_number(crescimento_laudos, 1)}% nos laudos\n"
+
+        relatorio += "\n## 🚨 ALERTAS E RECOMENDAÇÕES\n"
+        alertas_relatorio = []
+        if backlog_meses and backlog_meses > 6:
+            alertas_relatorio.append("🔴 **CRÍTICO:** Backlog superior a 6 meses - necessário plano de ação imediato")
+        elif backlog_meses and backlog_meses > 3:
+            alertas_relatorio.append("🟡 **ATENÇÃO:** Backlog entre 3-6 meses - monitorar tendência")
+        if sla_30_percent and sla_30_percent < 70:
+            alertas_relatorio.append("🔴 **CRÍTICO:** SLA 30 dias abaixo de 70% - revisar processos")
+        if taxa_atendimento and taxa_atendimento < 50:
+            alertas_relatorio.append("🟡 **ATENÇÃO:** Taxa de conversão baixa - analisar gargalos")
+        relatorio += "\n".join(alertas_relatorio) if alertas_relatorio else "✅ **Situação Normal:** Todos os indicadores dentro dos parâmetros esperados"
+
+        relatorio += "\n\n## 📋 DATASETS UTILIZADOS\n"
+        for name, df in standardized_dfs.items():
+            if df is not None and not df.empty:
+                relatorio += f"- **{name.replace('_', ' ').title()}:** {len(df):,} registros\n"
+
+        relatorio += "\n---\n*Relatório gerado automaticamente pelo Dashboard PCI/SC*\n*Sistema de Monitoramento de Produção e Pendências*"
+        return relatorio.strip()
+
+    if tipo_relatorio == "Relatório Executivo Completo":
+        relatorio_texto = gerar_relatorio_executivo()
+        st.markdown("#### 📄 Visualização do Relatório")
+        st.markdown(relatorio_texto)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        st.download_button(
+            label="📥 Download Relatório Executivo",
+            data=relatorio_texto.encode('utf-8'),
+            file_name=f"relatorio_executivo_pci_sc_{timestamp}.md",
+            mime="text/markdown"
+        )
+    elif tipo_relatorio == "Relatório de Produção":
+        st.markdown("#### 📊 Relatório de Produção")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Métricas de Produção:**")
+            if df_laudos_todos is not None and "anomês" in df_laudos_todos.columns:
+                prod_mensal = (df_laudos_todos.groupby("anomês")["quantidade"].sum().reset_index().sort_values("anomês"))
+                st.line_chart(prod_mensal.set_index("anomês")["quantidade"], height=300)
+        with col2:
+            st.markdown("**Top Produtores (Unidades):**")
+            if df_laudos_todos is not None and "unidade" in df_laudos_todos.columns:
+                top_unidades = (df_laudos_todos.groupby("unidade")["quantidade"].sum().sort_values(ascending=False).head(10))
+                st.bar_chart(top_unidades, height=300)
+    else:
+        st.info(f"Relatório '{tipo_relatorio}' em desenvolvimento.")
+
+# ============ ABA 7: DIÁRIO ============
+with tab7:
+    st.subheader("📅 Análise Diária – Atendimentos e Laudos")
+
+    def daily_counts(df: Optional[pd.DataFrame], label: str) -> pd.DataFrame:
+        if df is None or df.empty or "dia" not in df.columns:
+            return pd.DataFrame(columns=["dia", label])
+        tmp = (df.dropna(subset=["dia"]).groupby("dia", as_index=False)["quantidade"].sum()
+               .rename(columns={"quantidade": label}).sort_values("dia"))
+        return tmp
+
+    atend_d = daily_counts(df_atend_diario, "Atendimentos")
+    laudos_d = daily_counts(df_laudos_diario, "Laudos")
+
+    if atend_d.empty and laudos_d.empty:
+        st.info("Sem dados diários carregados. Envie **Atendimentos (Diário)** e/ou **Laudos (Diário)**.")
+    else:
+        diario = pd.merge(atend_d, laudos_d, on="dia", how="outer").fillna(0)
+        diario["Atendimentos"] = pd.to_numeric(diario["Atendimentos"], errors="coerce").fillna(0)
+        diario["Laudos"] = pd.to_numeric(diario["Laudos"], errors="coerce").fillna(0)
+        diario = diario.sort_values("dia").reset_index(drop=True)
+
+        def mm7(s: pd.Series) -> pd.Series:
+            return s.rolling(7).mean()
+
+        diario["MA7_Atend"] = mm7(diario["Atendimentos"])
+        diario["MA7_Laudos"] = mm7(diario["Laudos"])
+        diario["Taxa_Conversao_%"] = np.where(
+            diario["Atendimentos"] > 0, (diario["Laudos"] / diario["Atendimentos"]) * 100, np.nan
+        )
+        diario["MA7_Taxa_%"] = mm7(diario["Taxa_Conversao_%"])
+
+        ultima_data = diario["dia"].max() if not diario.empty else None
+        ult_reg = diario[diario["dia"] == ultima_data].iloc[0] if ultima_data is not None else None
+
+        colA, colB, colC, colD = st.columns(4)
+        with colA:
+            st.metric("Último dia", ultima_data.strftime("%d/%m/%Y") if ultima_data is not None else "—")
+        with colB:
+            st.metric("Atendimentos (último dia)", f"{int(ult_reg['Atendimentos']):,}".replace(",", ".") if ult_reg is not None else "—")
+        with colC:
+            st.metric("Laudos (último dia)", f"{int(ult_reg['Laudos']):,}".replace(",", ".") if ult_reg is not None else "—")
+        with colD:
+            taxa = ult_reg["Taxa_Conversao_%"] if (ult_reg is not None and not pd.isna(ult_reg["Taxa_Conversao_%"])) else None
+            st.metric("Taxa de Conversão (últ. dia)", f"{taxa:.1f}%" if taxa is not None else "—")
+
+        st.markdown("#### 📈 Evolução Diária")
+        fig_d = go.Figure()
+        fig_d.add_trace(go.Scatter(x=diario["dia"], y=diario["Atendimentos"], mode="lines", name="Atendimentos"))
+        fig_d.add_trace(go.Scatter(x=diario["dia"], y=diario["Laudos"], mode="lines", name="Laudos"))
+        if diario["MA7_Atend"].notna().any():
+            fig_d.add_trace(go.Scatter(x=diario["dia"], y=diario["MA7_Atend"], mode="lines", name="Atend MM7", line=dict(dash="dash")))
+        if diario["MA7_Laudos"].notna().any():
+            fig_d.add_trace(go.Scatter(x=diario["dia"], y=diario["MA7_Laudos"], mode="lines", name="Laudos MM7", line=dict(dash="dash")))
+        fig_d.update_layout(height=420, hovermode="x unified", xaxis_title="Dia", yaxis_title="Quantidade")
+        st.plotly_chart(fig_d, use_container_width=True)
+
+        if diario["Taxa_Conversao_%"].notna().any():
+            st.markdown("#### 🎯 Taxa de Conversão Diária (%)")
+            fig_tc = go.Figure()
+            fig_tc.add_trace(go.Scatter(x=diario["dia"], y=diario["Taxa_Conversao_%"], mode="lines", name="Taxa Conversão (%)"))
+            if diario["MA7_Taxa_%"].notna().any():
+                fig_tc.add_trace(go.Scatter(x=diario["dia"], y=diario["MA7_Taxa_%"], mode="lines", name="Taxa MM7 (%)", line=dict(dash="dash")))
+            if show_bench:
+                fig_tc.add_hline(y=70, line_dash="dot", line_color="red", annotation_text="Meta 70%")
+            fig_tc.update_layout(height=320, hovermode="x unified", xaxis_title="Dia", yaxis_title="%")
+            st.plotly_chart(fig_tc, use_container_width=True)
+
+        st.markdown("#### 📋 Tabela Diária – Atendimentos e Laudos")
+        tabela = diario.copy()
+        tabela["dia"] = tabela["dia"].dt.strftime("%d/%m/%Y")
+        cols = ["dia", "Atendimentos", "Laudos", "Taxa_Conversao_%", "MA7_Atend", "MA7_Laudos", "MA7_Taxa_%"]
+        cols = [c for c in cols if c in tabela.columns]
+        st.dataframe(tabela[cols].tail(120), use_container_width=True, height=420)
+
+        csv_daily = diario.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Baixar tabela diária (CSV)",
+            data=csv_daily,
+            file_name=f"diario_atendimentos_laudos_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
+
+# ============ RODAPÉ ============
+st.markdown("---")
+st.markdown(f"""
+<div style='text-align: center; color: #666; font-size: 14px; padding: 20px;'>
+    <p><strong>Dashboard PCI/SC v2.2</strong> - Sistema Avançado de Monitoramento (CORRIGIDO)</p>
+    <p>📊 Produção • ⏰ Pendências • 📈 Performance • 📋 Gestão</p>
+    <p>Para suporte técnico ou sugestões: <strong>equipe-ti@pci.sc.gov.br</strong></p>
+    <p><em>Última atualização: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</em></p>
+    <div style='margin-top: 15px; padding: 10px; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #3b82f6;'>
+        <p style='margin: 0; font-weight: bold; color: #1e40af;'>✨ CORREÇÕES APLICADAS:</p>
+        <p style='margin: 5px 0 0 0; font-size: 12px; color: #1e40af;'>
+            • Valores tratados como totais agregados (não como IDs)<br>
+            • Cálculos de KPIs corrigidos<br>
+            • Mapeamento de colunas ajustado<br>
+            • Processamento de datas otimizado
+        </p>
+    </div>
+</div>
+""", unsafe_allow_html=True)name = f"dh{field}"
+            if col_name in result.columns:
+                result[f"dh{field}"] = process_datetime_column(result[col_name])
+
+        # Calcular TME se possível
+        if "dhemissao" in result.columns and "dhatendimento" in result.columns:
+            result["tme_dias"] = (result["dhemissao"] - result["dhatendimento"]).dt.days
+        elif "dhemissao" in result.columns and "dhsolicitacao" in result.columns:
+            result["tme_dias"] = (result["dhemissao"] - result["dhsolicitacao"]).dt.days
+            
+        if "tme_dias" in result.columns:
+            result["sla_30_ok"] = result["tme_dias"] <= 30
+            result["sla_60_ok"] = result["tme_dias"] <= 60
+
+    # ===== CAMPOS DERIVADOS =====
+    
+    if "anomês_dt" in result.columns:
         result["anomês"] = result["anomês_dt"].dt.strftime("%Y-%m")
         result["ano"] = result["anomês_dt"].dt.year
         result["mes"] = result["anomês_dt"].dt.month
 
-    # Campo 'dia'
-    if "data_base" in result.columns and result["data_base"].notna().any():
-        result["dia"] = pd.to_datetime(result["data_base"]).dt.normalize()
-    elif "anomês_dt" in result.columns:
-        result["dia"] = pd.to_datetime(result["anomês_dt"]).dt.normalize()
-
-    # Processamento específico laudos_realizados
-    if name == "laudos_realizados":
-        for field in ["solicitacao", "atendimento", "emissao"]:
-            col_name = mapping.get(field)
-            if col_name and col_name in result.columns:
-                result[f"dh{field}"] = process_datetime_column(result[col_name])
-
-        if "dhemissao" in result.columns:
-            base_date = result.get("dhatendimento") if "dhatendimento" in result.columns else result.get("dhsolicitacao")
-            if base_date is not None:
-                result["tme_dias"] = (result["dhemissao"] - base_date).dt.days
-                result["sla_30_ok"] = result["tme_dias"] <= 30
-                result["sla_60_ok"] = result["tme_dias"] <= 60
-
-    # Limpeza texto
-    for col in ["diretoria", "superintendencia", "unidade", "tipo", "id", "perito", "anomês"]:
+    # ===== LIMPEZA DE TEXTO =====
+    
+    text_cols = ["diretoria", "superintendencia", "unidade", "tipo", "id", "perito", "anomês"]
+    for col in text_cols:
         if col in result.columns:
             result[col] = (
                 result[col]
@@ -518,9 +631,10 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
 
     return result
 
-# === PRO: Padronização com período seguro ===
+# === PADRONIZAÇÃO COM PERÍODO SEGURO ===
 standardized_dfs = {}
 processing_info = []
+
 for name, df in raw_dataframes.items():
     standardized_df = standardize_dataframe(name, df)
     standardized_dfs[name] = standardized_df
@@ -590,13 +704,13 @@ def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
 
     return filtered
 
-# === PRO UI: Filtros rápidos ===
+# === FILTROS RÁPIDOS ===
 st.markdown("<h4 class='section-title'>🎛️ Filtros Rápidos</h4>", unsafe_allow_html=True)
 fc1, fc2, fc3 = st.columns([0.45, 0.35, 0.20])
 with fc1:
     quick_period = segment("Período", ["Ano atual","Últimos 6 meses","Últimos 3 meses","Todo o período"],
                            default=filter_periodo, key="quick_period")
-    filter_periodo = quick_period  # sincroniza com sua função apply_filters
+    filter_periodo = quick_period
 with fc2:
     foco = segment("Foco", ["Geral","Mensal","Diário"], default="Geral", key="quick_foco")
 with fc3:
@@ -657,6 +771,7 @@ def calculate_productivity_metrics(df_atend: pd.DataFrame, df_laudos: pd.DataFra
                 metrics["correlacao_atend_laudos"] = float(correlation) if not pd.isna(correlation) else None
     return metrics
 
+# CÁLCULOS PRINCIPAIS
 total_atendimentos = calculate_total(df_atend_todos)
 total_laudos = calculate_total(df_laudos_todos)
 total_pend_laudos = len(df_pend_laudos) if df_pend_laudos is not None and not df_pend_laudos.empty else 0
@@ -698,7 +813,6 @@ if df_pend_exames is not None and not df_pend_exames.empty and "data_base" in df
         aging_exames_medio = dias_pendentes.mean()
 
 # ============ EXIBIÇÃO DE KPIS ============
-# === PRO UI: Cards KPI ===
 def kpi_card(title, value, delta=None, help_text=None):
     html = f"""
     <div class="kpi-card">
@@ -739,7 +853,6 @@ if tme_mediano is not None or sla_30_percent is not None:
     with c11: kpi_card("SLA 30 dias", f"{format_number(sla_30_percent,1)}%" if sla_30_percent else "—")
     with c12: kpi_card("SLA 60 dias", f"{format_number(sla_60_percent,1)}%" if sla_60_percent else "—")
 
-
 # Alertas e insights
 st.markdown("#### 🚨 Alertas e Insights")
 alerts = []
@@ -766,14 +879,13 @@ st.markdown("---")
 # ============ ABAS ============
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 Visão Geral",
-    "📈 Tendências",
+    "📈 Tendências", 
     "🏆 Rankings",
     "⏰ Pendências",
     "📋 Dados",
     "📑 Relatórios",
     "📅 Diário"
 ])
-
 
 # ============ ABA 1: VISÃO GERAL ============
 with tab1:
@@ -806,9 +918,9 @@ with tab1:
 
         with col_right:
             st.markdown("#### 🔍 Distribuição por Tipo (Pareto)")
-            if "tipo" in df_laudos_todos.columns:
+            if "tipo" in df_laudos_esp.columns:
                 tipo_summary = (
-                    df_laudos_todos.groupby("tipo", as_index=False)["quantidade"].sum()
+                    df_laudos_esp.groupby("tipo", as_index=False)["quantidade"].sum()
                     .sort_values("quantidade", ascending=False)
                 )
                 tipo_summary["pct"] = 100 * tipo_summary["quantidade"] / tipo_summary["quantidade"].sum()
@@ -830,7 +942,6 @@ with tab1:
                 if show_bench:
                     fig_pareto.add_hline(y=80, line_dash="dash", line_color="red", secondary_y=True)
 
-                # mantém a ordem do eixo x conforme o ranking
                 fig_pareto.update_layout(
                     title="Pareto – Tipos de Perícia",
                     hovermode="x unified",
@@ -840,7 +951,7 @@ with tab1:
                 fig_pareto.update_yaxes(title_text="% Acumulado", range=[0, 100], secondary_y=True)
                 st.plotly_chart(fig_pareto, use_container_width=True)
 
-    # --- Evolução Mensal: depende de atendimentos E laudos ---
+    # Evolução Mensal
     if (
         df_atend_todos is not None and df_laudos_todos is not None
         and "anomês_dt" in df_atend_todos.columns and "anomês_dt" in df_laudos_todos.columns
@@ -870,6 +981,7 @@ with tab1:
         fig_temporal.update_layout(height=400, hovermode="x unified", xaxis_title="Período", yaxis_title="Quantidade")
         st.plotly_chart(fig_temporal, use_container_width=True)
 
+        # Taxa de conversão
         merged_monthly = pd.merge(
             atend_monthly.rename(columns={"Total": "Atendimentos"}),
             laudos_monthly.rename(columns={"Total": "Laudos"}),
@@ -891,7 +1003,7 @@ with tab1:
                 fig_conversao.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Meta: 70%")
             st.plotly_chart(fig_conversao, use_container_width=True)
 
-        # Funil depende dos dois datasets (ok ficar aqui)
+        # Funil de conversão
         st.markdown("#### 🧯 Funil de Conversão (Atendimento → Laudo)")
         total_at = calculate_total(df_atend_todos)
         total_la = calculate_total(df_laudos_todos)
@@ -899,7 +1011,7 @@ with tab1:
         fig_funnel = px.funnel(funil, x="Total", y="Etapa")
         st.plotly_chart(fig_funnel, use_container_width=True)
 
-    # --- Heatmap: depende só de laudos (fica FORA do if acima) ---
+    # Heatmap
     if df_laudos_todos is not None and "anomês_dt" in df_laudos_todos.columns:
         st.markdown("#### 🔥 Heatmap de Produção (Ano × Mês) – Laudos")
         tmp = df_laudos_todos.copy()
@@ -923,7 +1035,6 @@ with tab1:
             title="Heatmap Ano×Mês – Laudos"
         )
         st.plotly_chart(fig_heat, use_container_width=True)
-
 
 # ============ ABA 2: TENDÊNCIAS ============
 with tab2:
@@ -1008,7 +1119,7 @@ with tab2:
             fig_scatter.update_layout(height=400)
             st.plotly_chart(fig_scatter, use_container_width=True)
 
-# === PRO Chart: Boxplot de TME por Unidade / Tipo ===
+    # Boxplot de TME por Unidade / Tipo
     if df_laudos_real is not None and "tme_dias" in df_laudos_real.columns:
         st.markdown("#### 📦 Distribuição de TME por Unidade / Tipo")
         bx1, bx2 = st.columns(2)
@@ -1028,7 +1139,6 @@ with tab2:
                     title="TME (dias) por Tipo (Top 15)")
                 fig_box_t.update_layout(height=450)
                 st.plotly_chart(fig_box_t, use_container_width=True)
-
 
 # ============ ABA 3: RANKINGS ============
 with tab3:
@@ -1235,7 +1345,8 @@ with tab4:
 
         st.markdown("**📊 Detalhamento por Unidade:**")
         st.dataframe(pendencias_consolidadas.head(20), use_container_width=True, height=300)
-        # === PRO Chart: Stacked – Faixa de Aging x Diretoria ===
+
+    # Stacked Aging
     st.markdown("#### 🧱 Pendências por Faixa de Aging × Diretoria (Stacked)")
     def stacked_aging(df, titulo):
         if df is None or df.empty or "diretoria" not in df.columns:
@@ -1253,7 +1364,6 @@ with tab4:
 
     stacked_aging(df_pend_laudos, "Laudos Pendentes – Faixa de Aging × Diretoria")
     stacked_aging(df_pend_exames, "Exames Pendentes – Faixa de Aging × Diretoria")
-
 
 # ============ ABA 5: DADOS ============
 with tab5:
@@ -1371,203 +1481,4 @@ with tab5:
             st.markdown(f"**📋 Dados Filtrados ({len(df_display):,} de {len(df_selected):,} registros):**".replace(",", "."))
             st.dataframe(df_display, use_container_width=True, height=400)
 
-            col_down1, col_down2 = st.columns(2)
-            with col_down1:
-                csv_data = df_display.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download Dados Filtrados (CSV)",
-                    data=csv_data,
-                    file_name=f"{selected_dataset}_filtrado_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )
-            with col_down2:
-                csv_complete = df_selected.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download Dataset Completo (CSV)",
-                    data=csv_complete,
-                    file_name=f"{selected_dataset}_completo_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )
-
-# ============ ABA 6: RELATÓRIOS ============
-with tab6:
-    st.subheader("📑 Relatórios Executivos")
-    tipo_relatorio = st.selectbox(
-        "Tipo de Relatório:",
-        ["Relatório Executivo Completo", "Relatório de Produção", "Relatório de Pendências", "Relatório de Performance", "Relatório Comparativo"]
-    )
-
-    def gerar_relatorio_executivo() -> str:
-        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        relatorio = f"""
-# RELATÓRIO EXECUTIVO PCI/SC
-**Data de Geração:** {timestamp}
-**Período de Análise:** {filter_periodo}
-
-## 📊 RESUMO EXECUTIVO
-- **Atendimentos Totais:** {format_number(total_atendimentos)}
-- **Laudos Emitidos:** {format_number(total_laudos)}
-- **Taxa de Conversão:** {format_number(taxa_atendimento, 1) if taxa_atendimento else 'N/A'}%
-- **Produtividade Mensal:** {format_number(media_mensal_laudos, 1) if media_mensal_laudos else 'N/A'} laudos/mês
-
-## ⏰ GESTÃO DE PENDÊNCIAS
-- **Laudos Pendentes:** {format_number(total_pend_laudos)}
-- **Exames Pendentes:** {format_number(total_pend_exames)}
-- **Backlog Estimado:** {format_number(backlog_meses, 1) if backlog_meses else 'N/A'} meses
-- **Aging Médio:** {format_number(aging_laudos_medio or aging_exames_medio, 0) if (aging_laudos_medio or aging_exames_medio) else 'N/A'} dias
-
-## 🎯 PERFORMANCE OPERACIONAL
-- **TME Mediano:** {format_number(tme_mediano, 1) if tme_mediano else 'N/A'} dias
-- **SLA 30 dias:** {format_number(sla_30_percent, 1) if sla_30_percent else 'N/A'}%
-- **SLA 60 dias:** {format_number(sla_60_percent, 1) if sla_60_percent else 'N/A'}%
-
-## 📈 TENDÊNCIAS
-"""
-        if crescimento_laudos is not None:
-            if crescimento_laudos > 5:
-                relatorio += f"- **Crescimento Positivo:** Laudos cresceram {format_number(crescimento_laudos, 1)}% no período\n"
-            elif crescimento_laudos < -5:
-                relatorio += f"- **Alerta:** Laudos decresceram {format_number(abs(crescimento_laudos), 1)}% no período\n"
-            else:
-                relatorio += f"- **Estabilidade:** Variação de {format_number(crescimento_laudos, 1)}% nos laudos\n"
-
-        relatorio += "\n## 🚨 ALERTAS E RECOMENDAÇÕES\n"
-        alertas_relatorio = []
-        if backlog_meses and backlog_meses > 6:
-            alertas_relatorio.append("🔴 **CRÍTICO:** Backlog superior a 6 meses - necessário plano de ação imediato")
-        elif backlog_meses and backlog_meses > 3:
-            alertas_relatorio.append("🟡 **ATENÇÃO:** Backlog entre 3-6 meses - monitorar tendência")
-        if sla_30_percent and sla_30_percent < 70:
-            alertas_relatorio.append("🔴 **CRÍTICO:** SLA 30 dias abaixo de 70% - revisar processos")
-        if taxa_atendimento and taxa_atendimento < 50:
-            alertas_relatorio.append("🟡 **ATENÇÃO:** Taxa de conversão baixa - analisar gargalos")
-        relatorio += "\n".join(alertas_relatorio) if alertas_relatorio else "✅ **Situação Normal:** Todos os indicadores dentro dos parâmetros esperados"
-
-        relatorio += "\n\n## 📋 DATASETS UTILIZADOS\n"
-        for name, df in standardized_dfs.items():
-            if df is not None and not df.empty:
-                relatorio += f"- **{name.replace('_', ' ').title()}:** {len(df):,} registros\n"
-
-        relatorio += "\n---\n*Relatório gerado automaticamente pelo Dashboard PCI/SC*\n*Sistema de Monitoramento de Produção e Pendências*"
-        return relatorio.strip()
-
-    if tipo_relatorio == "Relatório Executivo Completo":
-        relatorio_texto = gerar_relatorio_executivo()
-        st.markdown("#### 📄 Visualização do Relatório")
-        st.markdown(relatorio_texto)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        st.download_button(
-            label="📥 Download Relatório Executivo",
-            data=relatorio_texto.encode('utf-8'),
-            file_name=f"relatorio_executivo_pci_sc_{timestamp}.md",
-            mime="text/markdown"
-        )
-    elif tipo_relatorio == "Relatório de Produção":
-        st.markdown("#### 📊 Relatório de Produção")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**Métricas de Produção:**")
-            if df_laudos_todos is not None and "anomês" in df_laudos_todos.columns:
-                prod_mensal = (df_laudos_todos.groupby("anomês")["quantidade"].sum().reset_index().sort_values("anomês"))
-                st.line_chart(prod_mensal.set_index("anomês")["quantidade"], height=300)
-        with col2:
-            st.markdown("**Top Produtores (Unidades):**")
-            if df_laudos_todos is not None and "unidade" in df_laudos_todos.columns:
-                top_unidades = (df_laudos_todos.groupby("unidade")["quantidade"].sum().sort_values(ascending=False).head(10))
-                st.bar_chart(top_unidades, height=300)
-    else:
-        st.info(f"Relatório '{tipo_relatorio}' em desenvolvimento.")
-
-# ============ ABA 7: DIÁRIO ============
-with tab7:
-    st.subheader("📅 Análise Diária – Atendimentos e Laudos")
-
-    def daily_counts(df: Optional[pd.DataFrame], label: str) -> pd.DataFrame:
-        if df is None or df.empty or "dia" not in df.columns:
-            return pd.DataFrame(columns=["dia", label])
-        tmp = (df.dropna(subset=["dia"]).groupby("dia", as_index=False)["quantidade"].sum()
-               .rename(columns={"quantidade": label}).sort_values("dia"))
-        return tmp
-
-    atend_d = daily_counts(df_atend_diario, "Atendimentos")
-    laudos_d = daily_counts(df_laudos_diario, "Laudos")
-
-    if atend_d.empty and laudos_d.empty:
-        st.info("Sem dados diários carregados. Envie **Atendimentos (Diário)** e/ou **Laudos (Diário)**.")
-    else:
-        diario = pd.merge(atend_d, laudos_d, on="dia", how="outer").fillna(0)
-        diario["Atendimentos"] = pd.to_numeric(diario["Atendimentos"], errors="coerce").fillna(0)
-        diario["Laudos"] = pd.to_numeric(diario["Laudos"], errors="coerce").fillna(0)
-        diario = diario.sort_values("dia").reset_index(drop=True)
-
-        def mm7(s: pd.Series) -> pd.Series:
-            return s.rolling(7).mean()
-
-        diario["MA7_Atend"] = mm7(diario["Atendimentos"])
-        diario["MA7_Laudos"] = mm7(diario["Laudos"])
-        diario["Taxa_Conversao_%"] = np.where(
-            diario["Atendimentos"] > 0, (diario["Laudos"] / diario["Atendimentos"]) * 100, np.nan
-        )
-        diario["MA7_Taxa_%"] = mm7(diario["Taxa_Conversao_%"])
-
-        ultima_data = diario["dia"].max() if not diario.empty else None
-        ult_reg = diario[diario["dia"] == ultima_data].iloc[0] if ultima_data is not None else None
-
-        colA, colB, colC, colD = st.columns(4)
-        with colA:
-            st.metric("Último dia", ultima_data.strftime("%d/%m/%Y") if ultima_data is not None else "—")
-        with colB:
-            st.metric("Atendimentos (último dia)", f"{int(ult_reg['Atendimentos']):,}".replace(",", ".") if ult_reg is not None else "—")
-        with colC:
-            st.metric("Laudos (último dia)", f"{int(ult_reg['Laudos']):,}".replace(",", ".") if ult_reg is not None else "—")
-        with colD:
-            taxa = ult_reg["Taxa_Conversao_%"] if (ult_reg is not None and not pd.isna(ult_reg["Taxa_Conversao_%"])) else None
-            st.metric("Taxa de Conversão (últ. dia)", f"{taxa:.1f}%" if taxa is not None else "—")
-
-        st.markdown("#### 📈 Evolução Diária")
-        fig_d = go.Figure()
-        fig_d.add_trace(go.Scatter(x=diario["dia"], y=diario["Atendimentos"], mode="lines", name="Atendimentos"))
-        fig_d.add_trace(go.Scatter(x=diario["dia"], y=diario["Laudos"], mode="lines", name="Laudos"))
-        if diario["MA7_Atend"].notna().any():
-            fig_d.add_trace(go.Scatter(x=diario["dia"], y=diario["MA7_Atend"], mode="lines", name="Atend MM7", line=dict(dash="dash")))
-        if diario["MA7_Laudos"].notna().any():
-            fig_d.add_trace(go.Scatter(x=diario["dia"], y=diario["MA7_Laudos"], mode="lines", name="Laudos MM7", line=dict(dash="dash")))
-        fig_d.update_layout(height=420, hovermode="x unified", xaxis_title="Dia", yaxis_title="Quantidade")
-        st.plotly_chart(fig_d, use_container_width=True)
-
-        if diario["Taxa_Conversao_%"].notna().any():
-            st.markdown("#### 🎯 Taxa de Conversão Diária (%)")
-            fig_tc = go.Figure()
-            fig_tc.add_trace(go.Scatter(x=diario["dia"], y=diario["Taxa_Conversao_%"], mode="lines", name="Taxa Conversão (%)"))
-            if diario["MA7_Taxa_%"].notna().any():
-                fig_tc.add_trace(go.Scatter(x=diario["dia"], y=diario["MA7_Taxa_%"], mode="lines", name="Taxa MM7 (%)", line=dict(dash="dash")))
-            if show_bench:
-                fig_tc.add_hline(y=70, line_dash="dot", line_color="red", annotation_text="Meta 70%")
-            fig_tc.update_layout(height=320, hovermode="x unified", xaxis_title="Dia", yaxis_title="%")
-            st.plotly_chart(fig_tc, use_container_width=True)
-
-        st.markdown("#### 📋 Tabela Diária – Atendimentos e Laudos")
-        tabela = diario.copy()
-        tabela["dia"] = tabela["dia"].dt.strftime("%d/%m/%Y")
-        cols = ["dia", "Atendimentos", "Laudos", "Taxa_Conversao_%", "MA7_Atend", "MA7_Laudos", "MA7_Taxa_%"]
-        cols = [c for c in cols if c in tabela.columns]
-        st.dataframe(tabela[cols].tail(120), use_container_width=True, height=420)
-
-        csv_daily = diario.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📥 Baixar tabela diária (CSV)",
-            data=csv_daily,
-            file_name=f"diario_atendimentos_laudos_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
-
-# ============ RODAPÉ ============
-st.markdown("---")
-st.markdown(f"""
-<div style='text-align: center; color: #666; font-size: 14px; padding: 20px;'>
-    <p><strong>Dashboard PCI/SC v2.1</strong> - Sistema Avançado de Monitoramento</p>
-    <p>📊 Produção • ⏰ Pendências • 📈 Performance • 📋 Gestão</p>
-    <p>Para suporte técnico ou sugestões: <strong>equipe-ti@pci.sc.gov.br</strong></p>
-    <p><em>Última atualização: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</em></p>
-</div>
-""", unsafe_allow_html=True)
+            col_
