@@ -98,19 +98,29 @@ def process_datetime_column(series: pd.Series, dayfirst: bool = True) -> Optiona
     """Processa coluna de data/hora com múltiplos formatos."""
     if series is None or len(series) == 0:
         return None
-
-    dt_series = pd.to_datetime(series, errors="coerce", dayfirst=dayfirst, infer_datetime_format=True)
-
-    if dt_series.isna().sum() > len(dt_series) * 0.5:
-        for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"]:
-            try:
-                dt_series = pd.to_datetime(series, format=fmt, errors="coerce")
-                if dt_series.notna().sum() > len(dt_series) * 0.5:
-                    break
-            except Exception:
-                continue
-
-    return dt_series if dt_series.notna().any() else None
+    
+    # Verificar se já é datetime
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return series
+    
+    # Tentar conversão padrão
+    try:
+        dt_series = pd.to_datetime(series, errors="coerce", dayfirst=dayfirst, infer_datetime_format=True)
+        
+        # Se muitos valores são NaT, tentar formatos específicos
+        if dt_series.isna().sum() > len(dt_series) * 0.5:
+            for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y-%m-%d %H:%M:%S"]:
+                try:
+                    dt_series = pd.to_datetime(series, format=fmt, errors="coerce")
+                    if dt_series.notna().sum() > len(dt_series) * 0.5:
+                        break
+                except Exception:
+                    continue
+        
+        return dt_series if dt_series.notna().any() else None
+        
+    except Exception:
+        return None
 
 # ============ UTILITÁRIOS ============
 def format_number(value: float, decimal_places: int = 0) -> str:
@@ -358,12 +368,12 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
         
         # Para dados mensais, usar o primeiro dia do mês
         if "mensal" in name.lower() or chosen_date_col == "data_interesse":
-            if result["data_base"].notna().any():
+            if result["data_base"] is not None and result["data_base"].notna().any():
                 result["anomês_dt"] = result["data_base"].dt.to_period("M").dt.to_timestamp()
         else:
             # Para dados diários, manter a data original
-            result["dia"] = result["data_base"].dt.normalize()
-            if result["data_base"].notna().any():
+            if result["data_base"] is not None and result["data_base"].notna().any():
+                result["dia"] = result["data_base"].dt.normalize()
                 result["anomês_dt"] = result["data_base"].dt.to_period("M").dt.to_timestamp()
 
     # ===== DIMENSÕES PADRÃO =====
@@ -389,13 +399,17 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
         for field in ["solicitacao", "atendimento", "emissao"]:
             col_name = f"dh{field}"
             if col_name in result.columns:
-                result[f"dh{field}"] = process_datetime_column(result[col_name])
+                processed_date = process_datetime_column(result[col_name])
+                if processed_date is not None:
+                    result[f"dh{field}"] = processed_date
 
         # Calcular TME se possível
         if "dhemissao" in result.columns and "dhatendimento" in result.columns:
-            result["tme_dias"] = (result["dhemissao"] - result["dhatendimento"]).dt.days
+            if (result["dhemissao"].notna().any() and result["dhatendimento"].notna().any()):
+                result["tme_dias"] = (result["dhemissao"] - result["dhatendimento"]).dt.days
         elif "dhemissao" in result.columns and "dhsolicitacao" in result.columns:
-            result["tme_dias"] = (result["dhemissao"] - result["dhsolicitacao"]).dt.days
+            if (result["dhemissao"].notna().any() and result["dhsolicitacao"].notna().any()):
+                result["tme_dias"] = (result["dhemissao"] - result["dhsolicitacao"]).dt.days
             
         if "tme_dias" in result.columns:
             result["sla_30_ok"] = result["tme_dias"] <= 30
@@ -403,7 +417,7 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
 
     # ===== CAMPOS DERIVADOS =====
     
-    if "anomês_dt" in result.columns:
+    if "anomês_dt" in result.columns and result["anomês_dt"].notna().any():
         result["anomês"] = result["anomês_dt"].dt.strftime("%Y-%m")
         result["ano"] = result["anomês_dt"].dt.year
         result["mes"] = result["anomês_dt"].dt.month
