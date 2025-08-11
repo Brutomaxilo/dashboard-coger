@@ -527,9 +527,12 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
             # Já está no formato correto, apenas certifica que quantidade está correta
             pass
     
+    if name in ["Atendimentos_especifico_Mensal", "Laudos_especifico_Mensal"]:
+        if "anomês_dt" in result.columns and "tipo" in result.columns:
+            # Já está no formato correto
+            pass
+
     return result
-            except Exception:
-                pass
     
     # Adiciona colunas de tempo padronizadas
     if anomês_dt is not None:
