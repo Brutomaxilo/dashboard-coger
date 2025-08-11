@@ -250,7 +250,7 @@ def create_sample_laudos_realizados() -> pd.DataFrame:
         "Informática Forense", "Balística", "Traumatologia Forense"
     ]
     unidades = ["Joinville", "Florianópolis", "Blumenau", "Chapecó", "Criciúma"]
-    diretorias = ["Diretoria Criminal", "Diretoria Cível", "Diretoria Administrativa"]
+    diretorias = ["Diretoria Criminal"]
     peritos = ["Alcides Ogliardi Junior", "Dr. Silva Santos", "Dra. Maria Oliveira", "Dr. João Pereira", "Dra. Ana Costa"]
 
     start_date = pd.Timestamp('2023-01-01')
