@@ -240,124 +240,29 @@ def resolve_file_path(name: str) -> Optional[str]:
     return None
 
 # ============ DADOS SIMULADOS PARA DEMO ============
-def create_sample_data() -> Dict[str, pd.DataFrame]:
-    """Cria dados simulados para todas as categorias."""
-    sample_data = {}
-    
-    # Dados simulados baseados no screenshot
+def create_sample_laudos_realizados() -> pd.DataFrame:
+    """Cria dados simulados de laudos realizados baseados no screenshot."""
+    sample_data = []
     tipos_pericia = [
-        "Traumatologia Forense", "Química Forense", "Informática Forense", 
-        "Local De Crime Contra O Patrimônio", "Tanatologia Forense", 
-        "Identificação De Veículos", "Balística", "Local De Crime Contra A Vida",
-        "Bioquímica Forense", "Toxicologia Forense", "Sexologia Forense",
-        "Perícias Papiloscópicas", "Perícias Ambientais", "Engenharia Forense",
-        "Documentoscopia", "Vestígios Biológicos", "Áudio E Imagem",
-        "Anatomopatologia Forense", "Merceologia", "Odontologia Forense"
+        "Química Forense", "Criminal Local de crime contra o patrimônio",
+        "Criminal Local de crime contra a vida", "Criminal Engenharia Forense",
+        "Criminal Identificação de veículos", "Criminal Identificação",
+        "Informática Forense", "Balística", "Traumatologia Forense"
     ]
-    
-    unidades = ["Joinville", "Florianópolis", "Blumenau", "Chapecó", "Criciúma", 
-                "Lages", "Itajaí", "São José", "Tubarão", "Caçador"]
-    
+    unidades = ["Joinville", "Florianópolis", "Blumenau", "Chapecó", "Criciúma"]
     diretorias = ["Diretoria Criminal", "Diretoria Cível", "Diretoria Administrativa"]
-    
-    superintendencias = ["Grande Florianópolis", "Norte", "Sul", "Oeste", "Vale do Itajaí"]
-    
-    peritos = ["Dr. Silva Santos", "Dra. Maria Oliveira", "Dr. João Pereira", 
-               "Dra. Ana Costa", "Dr. Carlos Ferreira", "Dra. Lucia Martins"]
+    peritos = ["Alcides Ogliardi Junior", "Dr. Silva Santos", "Dra. Maria Oliveira", "Dr. João Pereira", "Dra. Ana Costa"]
 
     start_date = pd.Timestamp('2023-01-01')
     end_date = pd.Timestamp('2024-12-31')
-    
+
     np.random.seed(42)
-    
-    # Atendimentos todos - mensal
-    atend_todos_data = []
-    current_date = start_date
-    while current_date <= end_date:
-        for unidade in unidades[:7]:  # Usar apenas algumas unidades
-            for diretoria in diretorias:
-                quantidade = np.random.randint(10, 150)
-                atend_todos_data.append({
-                    'data_interesse': current_date.strftime('%d/%m/%Y'),
-                    'idatendimento': f"A{len(atend_todos_data)+1}",
-                    'unidade': unidade,
-                    'diretoria': diretoria,
-                    'superintendencia': np.random.choice(superintendencias),
-                    'quantidade': quantidade
-                })
-        current_date += pd.DateOffset(months=1)
-    
-    sample_data["Atendimentos_todos_Mensal"] = pd.DataFrame(atend_todos_data)
-    
-    # Laudos todos - mensal
-    laudos_todos_data = []
-    current_date = start_date
-    while current_date <= end_date:
-        for unidade in unidades[:7]:
-            for diretoria in diretorias:
-                quantidade = np.random.randint(5, 120)
-                laudos_todos_data.append({
-                    'data_interesse': current_date.strftime('%d/%m/%Y'),
-                    'iddocumento': f"L{len(laudos_todos_data)+1}",
-                    'unidade': unidade,
-                    'diretoria': diretoria,
-                    'superintendencia': np.random.choice(superintendencias),
-                    'quantidade': quantidade
-                })
-        current_date += pd.DateOffset(months=1)
-    
-    sample_data["Laudos_todos_Mensal"] = pd.DataFrame(laudos_todos_data)
-    
-    # Atendimentos específicos - mensal
-    atend_esp_data = []
-    current_date = start_date
-    while current_date <= end_date:
-        for tipo in tipos_pericia:
-            for unidade in np.random.choice(unidades, size=3, replace=False):
-                quantidade = np.random.randint(1, 50)
-                atend_esp_data.append({
-                    'data_interesse': current_date.strftime('%d/%m/%Y'),
-                    'txcompetencia': tipo,
-                    'idatendimento': f"AE{len(atend_esp_data)+1}",
-                    'unidade': unidade,
-                    'diretoria': np.random.choice(diretorias),
-                    'superintendencia': np.random.choice(superintendencias),
-                    'tipo': tipo,
-                    'quantidade': quantidade
-                })
-        current_date += pd.DateOffset(months=1)
-    
-    sample_data["Atendimentos_especifico_Mensal"] = pd.DataFrame(atend_esp_data)
-    
-    # Laudos específicos - mensal
-    laudos_esp_data = []
-    current_date = start_date
-    while current_date <= end_date:
-        for tipo in tipos_pericia:
-            for unidade in np.random.choice(unidades, size=3, replace=False):
-                quantidade = np.random.randint(1, 40)
-                laudos_esp_data.append({
-                    'data_interesse': current_date.strftime('%d/%m/%Y'),
-                    'txcompetencia': tipo,
-                    'iddocumento': f"LE{len(laudos_esp_data)+1}",
-                    'unidade': unidade,
-                    'diretoria': np.random.choice(diretorias),
-                    'superintendencia': np.random.choice(superintendencias),
-                    'tipo': tipo,
-                    'quantidade': quantidade
-                })
-        current_date += pd.DateOffset(months=1)
-    
-    sample_data["Laudos_especifico_Mensal"] = pd.DataFrame(laudos_esp_data)
-    
-    # Laudos realizados
-    laudos_real_data = []
     for i in range(500):
         solicitacao = start_date + pd.Timedelta(days=np.random.randint(0, (end_date - start_date).days))
         atendimento = solicitacao + pd.Timedelta(days=np.random.randint(1, 30))
         emissao = atendimento + pd.Timedelta(days=np.random.randint(1, 120))
 
-        laudos_real_data.append({
+        sample_data.append({
             'dhsolicitacao': solicitacao.strftime('%d/%m/%Y'),
             'dhatendimento': atendimento.strftime('%d/%m/%Y'),
             'dhemitido': emissao.strftime('%d/%m/%Y'),
@@ -366,16 +271,11 @@ def create_sample_data() -> Dict[str, pd.DataFrame]:
             'mes_emissao': emissao.month,
             'unidade_emissao': np.random.choice(unidades),
             'diretoria': np.random.choice(diretorias),
-            'superintendencia': np.random.choice(superintendencias),
             'txcompetencia': f"{emissao.year}-{emissao.month:02d}",
             'txtipopericia': np.random.choice(tipos_pericia),
-            'tipo': np.random.choice(tipos_pericia),
             'perito': np.random.choice(peritos)
         })
-    
-    sample_data["laudos_realizados"] = pd.DataFrame(laudos_real_data)
-    
-    return sample_data
+    return pd.DataFrame(sample_data)
 
 # ============ CARREGAMENTO DE DADOS ============
 @st.cache_data
@@ -409,18 +309,14 @@ def load_all_data(file_sources: Dict) -> Dict[str, pd.DataFrame]:
             df.columns = [re.sub(r"\s+", " ", col.strip().lower()) for col in df.columns]
             loaded_data[name] = df
 
-    # Se não temos dados, criar dados simulados
-    if not loaded_data:
-        st.sidebar.info("📊 Usando dados simulados para demonstração")
-        loaded_data = create_sample_data()
-        # Padronizar colunas dos dados simulados
-        for name, df in loaded_data.items():
-            if df is not None:
-                df.columns = [re.sub(r"\s+", " ", col.strip().lower()) for col in df.columns]
+    if "laudos_realizados" not in loaded_data:
+        st.sidebar.info("📊 Usando dados simulados para Laudos Realizados (demo)")
+        loaded_data["laudos_realizados"] = create_sample_laudos_realizados()
 
     return loaded_data
 
 # Carrega os dados
+# Spinner de carregamento
 with st.spinner("Carregando e padronizando dados..."):
     raw_dataframes = load_all_data(uploads)
 
@@ -455,38 +351,26 @@ COLUMN_MAPPINGS = {
     "Atendimentos_todos_Mensal": {
         "date": "data_interesse",
         "id": "idatendimento",
-        "quantidade": "quantidade",
-        "unidade": "unidade",
-        "diretoria": "diretoria",
-        "superintendencia": "superintendencia"
+        "quantidade": "idatendimento"
     },
     "Atendimentos_especifico_Mensal": {
         "date": "data_interesse",
         "competencia": "txcompetencia",
         "id": "idatendimento",
-        "quantidade": "quantidade",
-        "tipo": "tipo",
-        "unidade": "unidade",
-        "diretoria": "diretoria",
-        "superintendencia": "superintendencia"
+        "quantidade": "idatendimento",
+        "tipo": "txcompetencia"
     },
     "Laudos_todos_Mensal": {
         "date": "data_interesse",
         "id": "iddocumento",
-        "quantidade": "quantidade",
-        "unidade": "unidade",
-        "diretoria": "diretoria",
-        "superintendencia": "superintendencia"
+        "quantidade": "iddocumento"
     },
     "Laudos_especifico_Mensal": {
         "date": "data_interesse",
         "competencia": "txcompetencia",
         "id": "iddocumento",
-        "quantidade": "quantidade",
-        "tipo": "tipo",
-        "unidade": "unidade",
-        "diretoria": "diretoria",
-        "superintendencia": "superintendencia"
+        "quantidade": "iddocumento",
+        "tipo": "txcompetencia"
     },
     "laudos_realizados": {
         "solicitacao": "dhsolicitacao",
@@ -497,7 +381,6 @@ COLUMN_MAPPINGS = {
         "mes": "mes_emissao",
         "unidade": "unidade_emissao",
         "diretoria": "diretoria",
-        "superintendencia": "superintendencia",
         "competencia": "txcompetencia",
         "tipo": "txtipopericia",
         "perito": "perito"
@@ -509,12 +392,12 @@ COLUMN_MAPPINGS.update({
     "Atendimentos_diario": {
         "date": "data_interesse",
         "id": "idatendimento",
-        "quantidade": "quantidade"
+        "quantidade": "idatendimento"
     },
     "Laudos_diario": {
         "date": "data_interesse",
         "id": "iddocumento",
-        "quantidade": "quantidade"
+        "quantidade": "iddocumento"
     }
 })
 
@@ -528,12 +411,10 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
     mapping = COLUMN_MAPPINGS.get(name, {})
     result = df.copy()
 
-    # Quantidade - sempre garantir uma coluna quantidade
-    if "quantidade" in result.columns:
-        result["quantidade"] = pd.to_numeric(result["quantidade"], errors="coerce").fillna(1)
-    elif name in ["Atendimentos_todos_Mensal", "Laudos_todos_Mensal",
-                  "Atendimentos_especifico_Mensal", "Laudos_especifico_Mensal",
-                  "Atendimentos_diario", "Laudos_diario"]:
+    # Quantidade
+    if name in ["Atendimentos_todos_Mensal", "Laudos_todos_Mensal",
+                "Atendimentos_especifico_Mensal", "Laudos_especifico_Mensal",
+                "Atendimentos_diario", "Laudos_diario"]:
         quantity_col = mapping.get("quantidade", mapping.get("id"))
         if quantity_col and quantity_col in result.columns:
             result["quantidade"] = pd.to_numeric(result[quantity_col], errors="coerce").fillna(1)
@@ -542,13 +423,10 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
     else:
         result["quantidade"] = 1
 
-    # Dimensões - mapear as colunas principais
+    # Dimensões
     for dim_col in ["diretoria", "superintendencia", "unidade", "tipo", "perito", "id"]:
         if dim_col in mapping and mapping[dim_col] in result.columns:
             result[dim_col] = result[mapping[dim_col]]
-        elif dim_col in result.columns:
-            # Manter a coluna se já existe
-            pass
 
     # Fallbacks inteligentes de data-base (nível diário)
     fallback_date_candidates = [
@@ -668,7 +546,7 @@ with st.sidebar.expander("📊 Resumo dos Dados", expanded=False):
 def extract_filter_values(column: str) -> List[str]:
     values = set()
     for df in standardized_dfs.values():
-        if df is not None and not df.empty and column in df.columns:
+        if column in df.columns:
             unique_vals = df[column].dropna().astype(str).unique()
             values.update(v for v in unique_vals if v and v.lower() != "nan")
     return sorted(list(values))
@@ -737,7 +615,7 @@ df_pend_exames = filtered_dfs.get("detalhes_examespendentes")
 df_atend_diario = filtered_dfs.get("Atendimentos_diario")
 df_laudos_diario = filtered_dfs.get("Laudos_diario")
 
-# ============ CÁLCULOS DE KPIS ============
+# ============ CÁLCULOS DE KPIs ============
 def calculate_total(df: pd.DataFrame) -> int:
     if df is None or df.empty or "quantidade" not in df.columns:
         return 0
@@ -1152,29 +1030,20 @@ with tab2:
                 st.plotly_chart(fig_box_t, use_container_width=True)
 
 
-# ============ ABA 3: RANKINGS - CORRIGIDO ============
+# ============ ABA 3: RANKINGS ============
 with tab3:
     st.subheader("🏆 Rankings e Comparativos")
 
     def create_enhanced_ranking(df: pd.DataFrame, dimension: str, title: str, top_n: int = 20) -> None:
         if df is None or df.empty or dimension not in df.columns:
-            st.info(f"Dados insuficientes para {title} - coluna '{dimension}' não encontrada")
+            st.info(f"Dados insuficientes para {title}")
             return
-        
-        # Verificar se temos dados válidos na dimensão
-        valid_data = df.dropna(subset=[dimension, "quantidade"])
-        if valid_data.empty:
-            st.info(f"Sem dados válidos para {title}")
-            return
-            
-        ranking_data = (valid_data.groupby(dimension).agg({"quantidade": ["sum", "count", "mean"]}).round(2))
+        ranking_data = (df.groupby(dimension).agg({"quantidade": ["sum", "count", "mean"]}).round(2))
         ranking_data.columns = ["Total", "Registros", "Média"]
         ranking_data = ranking_data.sort_values("Total", ascending=False).head(top_n).reset_index()
-        
         if ranking_data.empty:
             st.info(f"Sem dados para {title}")
             return
-            
         fig = px.bar(
             ranking_data, x="Total", y=dimension, orientation="h", title=title,
             color="Total", color_continuous_scale="Viridis", hover_data=["Registros", "Média"]
@@ -1182,14 +1051,11 @@ with tab3:
         fig.update_layout(height=max(400, len(ranking_data) * 30), showlegend=False,
                           yaxis={"categoryorder": "total ascending"})
         st.plotly_chart(fig, use_container_width=True)
-        
         with st.expander(f"📊 Detalhes - {title}"):
             st.dataframe(ranking_data, use_container_width=True)
 
     rank_tab1, rank_tab2, rank_tab3, rank_tab4 = st.tabs(["Por Diretoria", "Por Unidade", "Por Tipo", "Comparativo"])
-    
     with rank_tab1:
-        st.markdown("### Rankings por Diretoria")
         col1, col2 = st.columns(2)
         with col1:
             create_enhanced_ranking(df_atend_todos, "diretoria", "🏥 Atendimentos por Diretoria")
@@ -1197,7 +1063,6 @@ with tab3:
             create_enhanced_ranking(df_laudos_todos, "diretoria", "📄 Laudos por Diretoria")
 
     with rank_tab2:
-        st.markdown("### Rankings por Unidade")
         col1, col2 = st.columns(2)
         with col1:
             create_enhanced_ranking(df_atend_todos, "unidade", "🏥 Atendimentos por Unidade", 25)
@@ -1205,7 +1070,6 @@ with tab3:
             create_enhanced_ranking(df_laudos_todos, "unidade", "📄 Laudos por Unidade", 25)
 
     with rank_tab3:
-        st.markdown("### Rankings por Tipo de Perícia")
         col1, col2 = st.columns(2)
         with col1:
             create_enhanced_ranking(df_atend_esp, "tipo", "🏥 Atendimentos por Tipo", 20)
@@ -1213,7 +1077,7 @@ with tab3:
             create_enhanced_ranking(df_laudos_esp, "tipo", "📄 Laudos por Tipo", 20)
 
     with rank_tab4:
-        st.markdown("### Análise Comparativa de Eficiência")
+        st.markdown("#### 📊 Análise Comparativa de Eficiência")
         if (df_atend_todos is not None and df_laudos_todos is not None and
                 "unidade" in df_atend_todos.columns and "unidade" in df_laudos_todos.columns):
             atend_por_unidade = df_atend_todos.groupby("unidade")["quantidade"].sum().reset_index().rename(columns={"quantidade": "Atendimentos"})
@@ -1232,8 +1096,6 @@ with tab3:
                 st.markdown("**🥇 Top 10 Unidades Mais Eficientes:**")
                 top_eficientes = eficiencia_data.head(10)[["unidade", "Taxa_Conversao", "Atendimentos", "Laudos"]]
                 st.dataframe(top_eficientes, use_container_width=True)
-        else:
-            st.info("Dados insuficientes para análise comparativa de eficiência")
 
 # ============ ABA 4: PENDÊNCIAS ============
 with tab4:
@@ -1563,7 +1425,13 @@ with tab6:
 """
         if crescimento_laudos is not None:
             if crescimento_laudos > 5:
-                relatorio += "\n## 🚨 ALERTAS E RECOMENDAÇÕES\n"
+                relatorio += f"- **Crescimento Positivo:** Laudos cresceram {format_number(crescimento_laudos, 1)}% no período\n"
+            elif crescimento_laudos < -5:
+                relatorio += f"- **Alerta:** Laudos decresceram {format_number(abs(crescimento_laudos), 1)}% no período\n"
+            else:
+                relatorio += f"- **Estabilidade:** Variação de {format_number(crescimento_laudos, 1)}% nos laudos\n"
+
+        relatorio += "\n## 🚨 ALERTAS E RECOMENDAÇÕES\n"
         alertas_relatorio = []
         if backlog_meses and backlog_meses > 6:
             alertas_relatorio.append("🔴 **CRÍTICO:** Backlog superior a 6 meses - necessário plano de ação imediato")
@@ -1702,10 +1570,4 @@ st.markdown(f"""
     <p>Para suporte técnico ou sugestões: <strong>equipe-ti@pci.sc.gov.br</strong></p>
     <p><em>Última atualização: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</em></p>
 </div>
-""", unsafe_allow_html=True) f"- **Crescimento Positivo:** Laudos cresceram {format_number(crescimento_laudos, 1)}% no período\n"
-            elif crescimento_laudos < -5:
-                relatorio += f"- **Alerta:** Laudos decresceram {format_number(abs(crescimento_laudos), 1)}% no período\n"
-            else:
-                relatorio += f"- **Estabilidade:** Variação de {format_number(crescimento_laudos, 1)}% nos laudos\n"
-
-        relatorio +=
+""", unsafe_allow_html=True)
