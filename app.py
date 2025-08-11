@@ -397,121 +397,107 @@ COLUMN_MAPPINGS = {
 # ============ PADRONIZAÇÃO DE DADOS ============
 @st.cache_data
 def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
-    """Padroniza estrutura do DataFrame para análise unificada."""
+    """Padroniza estrutura do DataFrame para análise unificada (mensal e diário)."""
     if df is None or df.empty:
         return pd.DataFrame()
-    
+
     mapping = COLUMN_MAPPINGS.get(name, {})
     result = df.copy()
-    
-    # Para arquivos mensais, o valor na coluna ID já representa a quantidade
-    if name in ["Atendimentos_todos_Mensal", "Laudos_todos_Mensal", 
-                "Atendimentos_especifico_Mensal", "Laudos_especifico_Mensal"]:
-        
-        quantity_col = mapping.get("quantidade", mapping.get("id"))
-        if quantity_col and quantity_col in result.columns:
-            # Converte para numérico
-            result["quantidade"] = pd.to_numeric(result[quantity_col], errors="coerce").fillna(0)
-        else:
-            result["quantidade"] = 1
+
+    # ---------- QUANTIDADE ----------
+    # Nunca usar ID como quantidade. Tenta detectar coluna "quant/total/qtd/qtde" numérica.
+    qcol = infer_quantity_col(result)  # usa QUANTITY_PATTERNS
+    if qcol:
+        result["quantidade"] = pd.to_numeric(result[qcol], errors="coerce").fillna(0)
     else:
-        # Para outros arquivos, cada linha é uma unidade
+        # Se não houver coluna clara de quantidade, cada linha vale 1.
         result["quantidade"] = 1
-    
-    # Mapeia colunas dimensionais
-    dimension_columns = [
-        "diretoria", "superintendencia", "unidade", 
-        "tipo", "perito", "id"
-    ]
-    
-    for dim_col in dimension_columns:
-        if dim_col in mapping and mapping[dim_col] in result.columns:
-            result[dim_col] = result[mapping[dim_col]]
-    
-    # Processa datas e competências
-    anomês_dt = None
-    
-    # Prioridade: competencia -> date -> ano/mes
-    if "competencia" in mapping and mapping["competencia"] in result.columns:
-        # Para txcompetencia, precisamos agrupar por data + tipo
-        if mapping["competencia"] == "txcompetencia":
-            date_col = mapping.get("date")
-            if date_col and date_col in result.columns:
-                date_series = process_datetime_column(result[date_col])
-                if date_series is not None:
-                    anomês_dt = date_series.dt.to_period("M").dt.to_timestamp()
-        else:
-            # Para outras competências, tenta converter diretamente
-            anomês_dt = process_datetime_column(result[mapping["competencia"]])
-            if anomês_dt is not None:
-                anomês_dt = anomês_dt.dt.to_period("M").dt.to_timestamp()
-    
-    if anomês_dt is None and "date" in mapping and mapping["date"] in result.columns:
-        date_col = process_datetime_column(result[mapping["date"]])
-        if date_col is not None:
-            anomês_dt = date_col.dt.to_period("M").dt.to_timestamp()
-    
-    # Para laudos_realizados: usar ano/mes se disponível
-    if anomês_dt is None and name == "laudos_realizados":
-        ano_col = mapping.get("ano")
-        mes_col = mapping.get("mes")
-        
-        if ano_col in result.columns and mes_col in result.columns:
-            try:
-                anos = pd.to_numeric(result[ano_col], errors="coerce")
-                meses = pd.to_numeric(result[mes_col], errors="coerce")
-                
-                valid_mask = (~anos.isna()) & (~meses.isna()) & (meses >= 1) & (meses <= 12)
-                if valid_mask.any():
-                    dates = pd.to_datetime({
-                        'year': anos,
-                        'month': meses, 
-                        'day': 1
-                    }, errors="coerce")
-                    anomês_dt = dates.dt.to_period("M").dt.to_timestamp()
-            except Exception:
-                pass
-    
-    # Adiciona colunas de tempo padronizadas
-    if anomês_dt is not None:
-        result["anomês_dt"] = anomês_dt
-        result["anomês"] = result["anomês_dt"].dt.strftime("%Y-%m")
-        result["ano"] = result["anomês_dt"].dt.year
-        result["mes"] = result["anomês_dt"].dt.month
-    
-    # Adiciona data base para cálculos de aging
-    if "date" in mapping and mapping["date"] in result.columns:
-        result["data_base"] = process_datetime_column(result[mapping["date"]])
-    
-    # Processamento específico para laudos realizados
+
+    # ---------- DIMENSÕES ----------
+    def pick(first_choice: Optional[str], candidates: List[str]) -> Optional[str]:
+        if first_choice and first_choice in result.columns:
+            return first_choice
+        for c in candidates:
+            if c in result.columns:
+                return c
+        return None
+
+    # tipo / unidade / perito / diretoria / superintendência / id
+    tipo_col = pick(mapping.get("tipo"), TIPO_CANDIDATES)
+    if tipo_col:
+        result["tipo"] = result[tipo_col]
+
+    unidade_col = pick(mapping.get("unidade"), UNIDADE_CANDIDATES)
+    if unidade_col:
+        result["unidade"] = result[unidade_col]
+
+    if "perito" in result.columns:
+        result["perito"] = result["perito"]
+
+    if "diretoria" in result.columns:
+        result["diretoria"] = result["diretoria"]
+
+    if "superintendencia" in result.columns:
+        result["superintendencia"] = result["superintendencia"]
+
+    id_col = pick(mapping.get("id"), ID_CANDIDATES)
+    if id_col:
+        result["id"] = result[id_col]
+
+    # ---------- TEMPO: competência (mensal) ----------
+    anomes_dt = None
+    comp_col = pick(mapping.get("competencia"), COMPETENCIA_CANDIDATES)
+    if comp_col and comp_col in result.columns:
+        raw = result[comp_col].astype(str).str.replace(r"[^\d/.\-]", "", regex=True)
+
+        # tenta padrões mais comuns
+        for fmt in ("%Y-%m", "%Y/%m", "%Y%m", "%m/%Y"):
+            anomes_dt = pd.to_datetime(raw, errors="coerce", format=fmt)
+            if anomes_dt.notna().any():
+                break
+        if anomes_dt is None or anomes_dt.isna().all():
+            anomes_dt = pd.to_datetime(raw, errors="coerce", dayfirst=True)
+
+        if anomes_dt.notna().any():
+            anomes_dt = anomes_dt.dt.to_period("M").dt.to_timestamp()
+
+    # ---------- TEMPO: data diária ----------
+    day_col = pick(mapping.get("date"), DATE_CANDIDATES)
+    data_base = None
+    if day_col and day_col in result.columns:
+        data_base = process_datetime_column(result[day_col])
+
+    if anomes_dt is not None and anomes_dt.notna().any():
+        result["anomês_dt"] = anomes_dt
+        result["anomês"] = anomes_dt.dt.strftime("%Y-%m")
+        result["ano"] = anomes_dt.dt.year
+        result["mes"] = anomes_dt.dt.month
+
+    if data_base is not None and data_base.notna().any():
+        result["data_base"] = data_base
+        result["dia"] = data_base.dt.normalize()
+    elif "anomês_dt" in result.columns:
+        # fallback: criar "dia" a partir do primeiro dia do mês
+        result["dia"] = pd.to_datetime(result["anomês_dt"]).dt.normalize()
+
+    # ---------- Regras específicas: laudos_realizados ----------
     if name == "laudos_realizados":
-        date_fields = ["solicitacao", "atendimento", "emissao"]
-        
-        for field in date_fields:
+        # datas detalhadas
+        for field in ["solicitacao", "atendimento", "emissao"]:
             col_name = mapping.get(field)
             if col_name and col_name in result.columns:
                 result[f"dh{field}"] = process_datetime_column(result[col_name])
-        
-        # Calcula TME (Tempo Médio de Execução)
+
+        # TME e SLAs se possível
         if "dhemissao" in result.columns:
-            base_date = (
-                result.get("dhatendimento") 
-                if "dhatendimento" in result.columns 
-                else result.get("dhsolicitacao")
-            )
-            
+            base_date = result.get("dhatendimento") if "dhatendimento" in result.columns else result.get("dhsolicitacao")
             if base_date is not None:
                 result["tme_dias"] = (result["dhemissao"] - base_date).dt.days
                 result["sla_30_ok"] = result["tme_dias"] <= 30
                 result["sla_60_ok"] = result["tme_dias"] <= 60
-    
-    # Limpeza e padronização de texto
-    text_columns = [
-        "diretoria", "superintendencia", "unidade", 
-        "tipo", "id", "perito", "anomês"
-    ]
-    
-    for col in text_columns:
+
+    # ---------- Limpeza de texto ----------
+    for col in ["diretoria", "superintendencia", "unidade", "tipo", "id", "perito", "anomês"]:
         if col in result.columns:
             result[col] = (
                 result[col]
@@ -520,73 +506,9 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
                 .str.title()
                 .replace({"Nan": None, "": None, "None": None})
             )
-    
-    # Para arquivos específicos, agrupa por mês + tipo
-    if name in ["Atendimentos_especifico_Mensal", "Laudos_especifico_Mensal"]:
-        if "anomês_dt" in result.columns and "tipo" in result.columns:
-            # Já está no formato correto, apenas certifica que quantidade está correta
-            pass
-    
+
     return result
-            except Exception:
-                pass
-    
-    # Adiciona colunas de tempo padronizadas
-    if anomês_dt is not None:
-        result["anomês_dt"] = anomês_dt
-        result["anomês"] = result["anomês_dt"].dt.strftime("%Y-%m")
-        result["ano"] = result["anomês_dt"].dt.year
-        result["mes"] = result["anomês_dt"].dt.month
-    
-    # Adiciona data base para cálculos de aging
-    if "date" in mapping and mapping["date"] in result.columns:
-        result["data_base"] = process_datetime_column(result[mapping["date"]])
-    
-    # Processamento específico para laudos realizados
-    if name == "laudos_realizados":
-        date_fields = ["solicitacao", "atendimento", "emissao"]
-        
-        for field in date_fields:
-            col_name = mapping.get(field)
-            if col_name and col_name in result.columns:
-                result[f"dh{field}"] = process_datetime_column(result[col_name])
-        
-        # Calcula TME (Tempo Médio de Execução)
-        if "dhemissao" in result.columns:
-            base_date = (
-                result.get("dhatendimento") 
-                if "dhatendimento" in result.columns 
-                else result.get("dhsolicitacao")
-            )
-            
-            if base_date is not None:
-                result["tme_dias"] = (result["dhemissao"] - base_date).dt.days
-                result["sla_30_ok"] = result["tme_dias"] <= 30
-                result["sla_60_ok"] = result["tme_dias"] <= 60
-    
-    # Limpeza e padronização de texto
-    text_columns = [
-        "diretoria", "superintendencia", "unidade", 
-        "tipo", "id", "perito", "anomês"
-    ]
-    
-    for col in text_columns:
-        if col in result.columns:
-            result[col] = (
-                result[col]
-                .astype(str)
-                .str.strip()
-                .str.title()
-                .replace({"Nan": None, "": None, "None": None})
-            )
-    
-    # Para arquivos específicos, agrupa por mês + tipo
-    if name in ["Atendimentos_especifico_Mensal", "Laudos_especifico_Mensal"]:
-        if "anomês_dt" in result.columns and "tipo" in result.columns:
-            # Já está no formato correto, apenas certifica que quantidade está correta
-            pass
-    
-    return result
+
 
 # Padroniza todos os DataFrames
 standardized_dfs = {}
