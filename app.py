@@ -25,7 +25,8 @@ st.markdown("---")
 @st.cache_data
 def read_csv_optimized(file_content: bytes, filename: str) -> Optional[pd.DataFrame]:
     """Lê CSV com detecção automática de separador e encoding otimizada."""
-    separators = [",", ";", "\t", "|"]
+    # Para arquivos PCI/SC, o separador principal é ponto e vírgula
+    separators = [";", ",", "\t", "|"]
     encodings = ["utf-8", "latin-1", "cp1252"]
     
     for encoding in encodings:
@@ -33,7 +34,16 @@ def read_csv_optimized(file_content: bytes, filename: str) -> Optional[pd.DataFr
             try:
                 bio = io.BytesIO(file_content)
                 df = pd.read_csv(bio, sep=sep, encoding=encoding, engine="python")
+                # Verifica se realmente separou as colunas (mais de 1 coluna)
                 if df.shape[1] > 1:
+                    # Remove aspas extras se existirem
+                    df.columns = [col.strip('"').strip() for col in df.columns]
+                    
+                    # Limpa dados das células também
+                    for col in df.columns:
+                        if df[col].dtype == 'object':
+                            df[col] = df[col].astype(str).str.strip('"').str.strip()
+                    
                     return df
             except Exception:
                 continue
@@ -41,9 +51,14 @@ def read_csv_optimized(file_content: bytes, filename: str) -> Optional[pd.DataFr
     # Fallback para detecção automática
     try:
         bio = io.BytesIO(file_content)
-        return pd.read_csv(bio, sep=None, engine="python", encoding="utf-8")
+        df = pd.read_csv(bio, sep=None, engine="python", encoding="utf-8")
+        if df.shape[1] > 1:
+            df.columns = [col.strip('"').strip() for col in df.columns]
+            return df
     except Exception:
-        return None
+        pass
+    
+    return None
 
 @st.cache_data
 def process_datetime_column(series: pd.Series, dayfirst: bool = True) -> Optional[pd.Series]:
@@ -136,31 +151,38 @@ if not has_data_dir:
 file_configs = {
     "Atendimentos_todos_Mensal": {
         "label": "Atendimentos Todos (Mensal)",
-        "description": "Dados gerais de atendimentos por mês"
+        "description": "Dados gerais de atendimentos por mês - agregados por competência",
+        "pattern": ["atendimentos_todos", "atendimentos todos"]
     },
     "Laudos_todos_Mensal": {
         "label": "Laudos Todos (Mensal)", 
-        "description": "Dados gerais de laudos por mês"
+        "description": "Dados gerais de laudos por mês - agregados por competência",
+        "pattern": ["laudos_todos", "laudos todos"]
     },
     "Atendimentos_especifico_Mensal": {
         "label": "Atendimentos Específicos (Mensal)",
-        "description": "Atendimentos detalhados por competência"
+        "description": "Atendimentos detalhados por competência e tipo",
+        "pattern": ["atendimentos_especifico", "atendimentos especifico"]
     },
     "Laudos_especifico_Mensal": {
         "label": "Laudos Específicos (Mensal)",
-        "description": "Laudos detalhados por competência"
+        "description": "Laudos detalhados por competência e tipo",
+        "pattern": ["laudos_especifico", "laudos especifico"]
     },
     "laudos_realizados": {
         "label": "Laudos Realizados",
-        "description": "Histórico detalhado de laudos concluídos"
+        "description": "Histórico detalhado de laudos concluídos com TME",
+        "pattern": ["laudos_realizados", "laudos realizados"]
     },
     "detalhes_laudospendentes": {
         "label": "Laudos Pendentes",
-        "description": "Laudos aguardando conclusão"
+        "description": "Laudos aguardando conclusão com aging",
+        "pattern": ["laudospendentes", "laudos_pendentes", "detalhes_laudospendentes"]
     },
     "detalhes_examespendentes": {
         "label": "Exames Pendentes", 
-        "description": "Exames aguardando realização"
+        "description": "Exames aguardando realização com aging",
+        "pattern": ["examespendentes", "exames_pendentes", "detalhes_examespendentes"]
     }
 }
 
@@ -181,7 +203,12 @@ def resolve_file_path(name: str) -> Optional[str]:
     if not os.path.exists("data"):
         return None
     
-    target_name = name.lower().replace(" ", "_")
+    # Usar padrões específicos se disponíveis
+    config = file_configs.get(name, {})
+    patterns = config.get("pattern", [name.lower().replace(" ", "_")])
+    
+    # Adiciona o nome original também
+    patterns.append(name.lower().replace(" ", "_"))
     
     for filename in os.listdir("data"):
         if not filename.lower().endswith(".csv"):
@@ -190,12 +217,69 @@ def resolve_file_path(name: str) -> Optional[str]:
         base_name = os.path.splitext(filename)[0].lower()
         normalized_name = re.sub(r"[^\w]", "_", base_name)
         
-        if normalized_name.startswith(target_name) or target_name in normalized_name:
-            return os.path.join("data", filename)
+        # Testa todos os padrões
+        for pattern in patterns:
+            if pattern in normalized_name or normalized_name.startswith(pattern):
+                return os.path.join("data", filename)
     
     return None
 
-# ============ CARREGAMENTO DE DADOS ============
+# ============ DADOS SIMULADOS PARA DEMO ============
+def create_sample_laudos_realizados() -> pd.DataFrame:
+    """Cria dados simulados de laudos realizados baseados no screenshot."""
+    
+    # Dados de exemplo baseados no screenshot fornecido
+    sample_data = []
+    
+    # Tipos de perícia do screenshot
+    tipos_pericia = [
+        "Química Forense", "Criminal Local de crime contra o patrimônio",
+        "Criminal Local de crime contra a vida", "Criminal Engenharia Forense",
+        "Criminal Identificação de veículos", "Criminal Identificação",
+        "Informática Forense", "Balística", "Traumatologia Forense"
+    ]
+    
+    # Unidades
+    unidades = ["Joinville", "Florianópolis", "Blumenau", "Chapecó", "Criciúma"]
+    
+    # Diretorias
+    diretorias = ["Diretoria Criminal", "Diretoria Cível", "Diretoria Administrativa"]
+    
+    # Peritos
+    peritos = [
+        "Alcides Ogliardi Junior", "Dr. Silva Santos", "Dra. Maria Oliveira",
+        "Dr. João Pereira", "Dra. Ana Costa"
+    ]
+    
+    # Gera dados simulados para os últimos 24 meses
+    start_date = pd.Timestamp('2022-01-01')
+    end_date = pd.Timestamp('2024-01-01')
+    
+    np.random.seed(42)  # Para reprodutibilidade
+    
+    for i in range(500):  # 500 laudos simulados
+        # Datas
+        solicitacao = start_date + pd.Timedelta(days=np.random.randint(0, (end_date - start_date).days))
+        atendimento = solicitacao + pd.Timedelta(days=np.random.randint(1, 30))
+        emissao = atendimento + pd.Timedelta(days=np.random.randint(1, 120))
+        
+        sample_data.append({
+            'dhsolicitacao': solicitacao.strftime('%d/%m/%Y'),
+            'dhatendimento': atendimento.strftime('%d/%m/%Y'),
+            'dhemitido': emissao.strftime('%d/%m/%Y'),
+            'n_laudo': f"L{2000 + i}",
+            'ano_emissao': emissao.year,
+            'mes_emissao': emissao.month,
+            'unidade_emissao': np.random.choice(unidades),
+            'diretoria': np.random.choice(diretorias),
+            'txcompetencia': f"{emissao.year}-{emissao.month:02d}",
+            'txtipopericia': np.random.choice(tipos_pericia),
+            'perito': np.random.choice(peritos)
+        })
+    
+    return pd.DataFrame(sample_data)
+
+# ============ CARREGAMENTO DE DADOS MELHORADO ============
 @st.cache_data
 def load_all_data(file_sources: Dict) -> Dict[str, pd.DataFrame]:
     """Carrega todos os dados disponíveis."""
@@ -211,15 +295,19 @@ def load_all_data(file_sources: Dict) -> Dict[str, pd.DataFrame]:
                     with open(file_path, 'rb') as f:
                         content = f.read()
                     df = read_csv_optimized(content, name)
+                    if df is not None:
+                        st.sidebar.success(f"✅ {name}: {len(df)} registros")
                 except Exception as e:
-                    st.sidebar.error(f"Erro ao carregar {name}: {str(e)}")
+                    st.sidebar.error(f"❌ Erro ao carregar {name}: {str(e)}")
         else:
             if upload_file is not None:
                 try:
                     content = upload_file.read()
                     df = read_csv_optimized(content, name)
+                    if df is not None:
+                        st.sidebar.success(f"✅ {name}: {len(df)} registros")
                 except Exception as e:
-                    st.sidebar.error(f"Erro ao processar {name}: {str(e)}")
+                    st.sidebar.error(f"❌ Erro ao processar {name}: {str(e)}")
         
         if df is not None:
             # Normaliza nomes das colunas
@@ -228,6 +316,11 @@ def load_all_data(file_sources: Dict) -> Dict[str, pd.DataFrame]:
                 for col in df.columns
             ]
             loaded_data[name] = df
+    
+    # Se não há dados de laudos realizados, cria dados simulados para demo
+    if "laudos_realizados" not in loaded_data:
+        st.sidebar.info("📊 Usando dados simulados para Laudos Realizados (demo)")
+        loaded_data["laudos_realizados"] = create_sample_laudos_realizados()
     
     return loaded_data
 
@@ -239,7 +332,7 @@ if not raw_dataframes:
     st.info("📝 **Arquivos esperados:** " + ", ".join(file_configs.keys()))
     st.stop()
 
-# ============ MAPEAMENTO DE COLUNAS APRIMORADO ============
+# ============ MAPEAMENTO DE COLUNAS CORRIGIDO ============
 COLUMN_MAPPINGS = {
     "detalhes_laudospendentes": {
         "date": "data_solicitacao",
@@ -264,21 +357,27 @@ COLUMN_MAPPINGS = {
     },
     "Atendimentos_todos_Mensal": {
         "date": "data_interesse",
-        "id": "idatendimento"
+        "id": "idatendimento",
+        "quantidade": "idatendimento"  # O ID representa a quantidade de atendimentos
     },
     "Atendimentos_especifico_Mensal": {
         "date": "data_interesse",
         "competencia": "txcompetencia",
-        "id": "idatendimento"
+        "id": "idatendimento",
+        "quantidade": "idatendimento",  # O ID representa a quantidade de atendimentos
+        "tipo": "txcompetencia"  # txcompetencia é o tipo de perícia
     },
     "Laudos_todos_Mensal": {
         "date": "data_interesse", 
-        "id": "iddocumento"
+        "id": "iddocumento",
+        "quantidade": "iddocumento"  # O ID representa a quantidade de documentos
     },
     "Laudos_especifico_Mensal": {
         "date": "data_interesse",
         "competencia": "txcompetencia",
-        "id": "iddocumento"
+        "id": "iddocumento",
+        "quantidade": "iddocumento",  # O ID representa a quantidade de documentos
+        "tipo": "txcompetencia"  # txcompetencia é o tipo de perícia
     },
     "laudos_realizados": {
         "solicitacao": "dhsolicitacao",
@@ -305,8 +404,19 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
     mapping = COLUMN_MAPPINGS.get(name, {})
     result = df.copy()
     
-    # Adiciona coluna de quantidade padrão
-    result["quantidade"] = 1
+    # Para arquivos mensais, o valor na coluna ID já representa a quantidade
+    if name in ["Atendimentos_todos_Mensal", "Laudos_todos_Mensal", 
+                "Atendimentos_especifico_Mensal", "Laudos_especifico_Mensal"]:
+        
+        quantity_col = mapping.get("quantidade", mapping.get("id"))
+        if quantity_col and quantity_col in result.columns:
+            # Converte para numérico
+            result["quantidade"] = pd.to_numeric(result[quantity_col], errors="coerce").fillna(0)
+        else:
+            result["quantidade"] = 1
+    else:
+        # Para outros arquivos, cada linha é uma unidade
+        result["quantidade"] = 1
     
     # Mapeia colunas dimensionais
     dimension_columns = [
@@ -323,9 +433,18 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
     
     # Prioridade: competencia -> date -> ano/mes
     if "competencia" in mapping and mapping["competencia"] in result.columns:
-        anomês_dt = process_datetime_column(result[mapping["competencia"]])
-        if anomês_dt is not None:
-            anomês_dt = anomês_dt.dt.to_period("M").dt.to_timestamp()
+        # Para txcompetencia, precisamos agrupar por data + tipo
+        if mapping["competencia"] == "txcompetencia":
+            date_col = mapping.get("date")
+            if date_col and date_col in result.columns:
+                date_series = process_datetime_column(result[date_col])
+                if date_series is not None:
+                    anomês_dt = date_series.dt.to_period("M").dt.to_timestamp()
+        else:
+            # Para outras competências, tenta converter diretamente
+            anomês_dt = process_datetime_column(result[mapping["competencia"]])
+            if anomês_dt is not None:
+                anomês_dt = anomês_dt.dt.to_period("M").dt.to_timestamp()
     
     if anomês_dt is None and "date" in mapping and mapping["date"] in result.columns:
         date_col = process_datetime_column(result[mapping["date"]])
@@ -374,7 +493,7 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
                 result[f"dh{field}"] = process_datetime_column(result[col_name])
         
         # Calcula TME (Tempo Médio de Execução)
-        if "dhemitido" in result.columns:
+        if "dhemissao" in result.columns:
             base_date = (
                 result.get("dhatendimento") 
                 if "dhatendimento" in result.columns 
@@ -382,7 +501,7 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
             )
             
             if base_date is not None:
-                result["tme_dias"] = (result["dhemitido"] - base_date).dt.days
+                result["tme_dias"] = (result["dhemissao"] - base_date).dt.days
                 result["sla_30_ok"] = result["tme_dias"] <= 30
                 result["sla_60_ok"] = result["tme_dias"] <= 60
     
@@ -399,8 +518,73 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
                 .astype(str)
                 .str.strip()
                 .str.title()
-                .replace({"Nan": None, "": None})
+                .replace({"Nan": None, "": None, "None": None})
             )
+    
+    # Para arquivos específicos, agrupa por mês + tipo
+    if name in ["Atendimentos_especifico_Mensal", "Laudos_especifico_Mensal"]:
+        if "anomês_dt" in result.columns and "tipo" in result.columns:
+            # Já está no formato correto, apenas certifica que quantidade está correta
+            pass
+    
+    return result
+            except Exception:
+                pass
+    
+    # Adiciona colunas de tempo padronizadas
+    if anomês_dt is not None:
+        result["anomês_dt"] = anomês_dt
+        result["anomês"] = result["anomês_dt"].dt.strftime("%Y-%m")
+        result["ano"] = result["anomês_dt"].dt.year
+        result["mes"] = result["anomês_dt"].dt.month
+    
+    # Adiciona data base para cálculos de aging
+    if "date" in mapping and mapping["date"] in result.columns:
+        result["data_base"] = process_datetime_column(result[mapping["date"]])
+    
+    # Processamento específico para laudos realizados
+    if name == "laudos_realizados":
+        date_fields = ["solicitacao", "atendimento", "emissao"]
+        
+        for field in date_fields:
+            col_name = mapping.get(field)
+            if col_name and col_name in result.columns:
+                result[f"dh{field}"] = process_datetime_column(result[col_name])
+        
+        # Calcula TME (Tempo Médio de Execução)
+        if "dhemissao" in result.columns:
+            base_date = (
+                result.get("dhatendimento") 
+                if "dhatendimento" in result.columns 
+                else result.get("dhsolicitacao")
+            )
+            
+            if base_date is not None:
+                result["tme_dias"] = (result["dhemissao"] - base_date).dt.days
+                result["sla_30_ok"] = result["tme_dias"] <= 30
+                result["sla_60_ok"] = result["tme_dias"] <= 60
+    
+    # Limpeza e padronização de texto
+    text_columns = [
+        "diretoria", "superintendencia", "unidade", 
+        "tipo", "id", "perito", "anomês"
+    ]
+    
+    for col in text_columns:
+        if col in result.columns:
+            result[col] = (
+                result[col]
+                .astype(str)
+                .str.strip()
+                .str.title()
+                .replace({"Nan": None, "": None, "None": None})
+            )
+    
+    # Para arquivos específicos, agrupa por mês + tipo
+    if name in ["Atendimentos_especifico_Mensal", "Laudos_especifico_Mensal"]:
+        if "anomês_dt" in result.columns and "tipo" in result.columns:
+            # Já está no formato correto, apenas certifica que quantidade está correta
+            pass
     
     return result
 
@@ -525,14 +709,16 @@ df_laudos_real = filtered_dfs.get("laudos_realizados")
 df_pend_laudos = filtered_dfs.get("detalhes_laudospendentes")
 df_pend_exames = filtered_dfs.get("detalhes_examespendentes")
 
-# ============ CÁLCULO DE KPIS APRIMORADOS ============
+# ============ CÁLCULO DE KPIS CORRIGIDOS ============
 def calculate_total(df: pd.DataFrame) -> int:
-    """Calcula total de registros."""
-    return len(df) if df is not None and not df.empty else 0
+    """Calcula total considerando a coluna quantidade."""
+    if df is None or df.empty or "quantidade" not in df.columns:
+        return 0
+    return int(df["quantidade"].sum())
 
 def calculate_monthly_average(df: pd.DataFrame) -> Optional[float]:
-    """Calcula média mensal."""
-    if df is None or df.empty or "anomês_dt" not in df.columns:
+    """Calcula média mensal considerando quantidade."""
+    if df is None or df.empty or "anomês_dt" not in df.columns or "quantidade" not in df.columns:
         return None
     
     monthly_totals = df.groupby("anomês_dt")["quantidade"].sum()
@@ -540,7 +726,7 @@ def calculate_monthly_average(df: pd.DataFrame) -> Optional[float]:
 
 def calculate_growth_rate(df: pd.DataFrame, periods: int = 3) -> Optional[float]:
     """Calcula taxa de crescimento dos últimos períodos."""
-    if df is None or df.empty or "anomês_dt" not in df.columns:
+    if df is None or df.empty or "anomês_dt" not in df.columns or "quantidade" not in df.columns:
         return None
     
     monthly_data = (
@@ -562,11 +748,36 @@ def calculate_growth_rate(df: pd.DataFrame, periods: int = 3) -> Optional[float]
     
     return None
 
+def calculate_productivity_metrics(df_atend: pd.DataFrame, df_laudos: pd.DataFrame) -> Dict:
+    """Calcula métricas de produtividade comparativas."""
+    metrics = {}
+    
+    if df_atend is not None and df_laudos is not None:
+        # Taxa de conversão atendimento -> laudo
+        total_atend = calculate_total(df_atend)
+        total_laudos = calculate_total(df_laudos)
+        
+        if total_atend > 0:
+            metrics["taxa_conversao"] = (total_laudos / total_atend) * 100
+        
+        # Eficiência temporal (se há dados temporais)
+        if ("anomês_dt" in df_atend.columns and "anomês_dt" in df_laudos.columns):
+            atend_monthly = df_atend.groupby("anomês_dt")["quantidade"].sum()
+            laudos_monthly = df_laudos.groupby("anomês_dt")["quantidade"].sum()
+            
+            # Correlação entre atendimentos e laudos
+            common_months = atend_monthly.index.intersection(laudos_monthly.index)
+            if len(common_months) > 3:
+                correlation = atend_monthly.loc[common_months].corr(laudos_monthly.loc[common_months])
+                metrics["correlacao_atend_laudos"] = correlation
+    
+    return metrics
+
 # Calcula KPIs principais
 total_atendimentos = calculate_total(df_atend_todos)
 total_laudos = calculate_total(df_laudos_todos)
-total_pend_laudos = calculate_total(df_pend_laudos)
-total_pend_exames = calculate_total(df_pend_exames)
+total_pend_laudos = len(df_pend_laudos) if df_pend_laudos is not None and not df_pend_laudos.empty else 0
+total_pend_exames = len(df_pend_exames) if df_pend_exames is not None and not df_pend_exames.empty else 0
 
 # KPIs derivados
 media_mensal_laudos = calculate_monthly_average(df_laudos_todos)
@@ -576,18 +787,26 @@ backlog_meses = (
     else None
 )
 
-taxa_atendimento = calculate_percentage(total_laudos, total_atendimentos)
+# Métricas de produtividade
+produtividade_metrics = calculate_productivity_metrics(df_atend_todos, df_laudos_todos)
+taxa_atendimento = produtividade_metrics.get("taxa_conversao")
+correlacao_atend_laudos = produtividade_metrics.get("correlacao_atend_laudos")
+
 crescimento_laudos = calculate_growth_rate(df_laudos_todos)
+crescimento_atendimentos = calculate_growth_rate(df_atend_todos)
 
 # KPIs de performance (laudos realizados)
 tme_mediano = None
+tme_medio = None
 sla_30_percent = None
 sla_60_percent = None
 
 if df_laudos_real is not None and not df_laudos_real.empty:
     if "tme_dias" in df_laudos_real.columns:
         tme_values = pd.to_numeric(df_laudos_real["tme_dias"], errors="coerce").dropna()
-        tme_mediano = tme_values.median() if not tme_values.empty else None
+        if not tme_values.empty:
+            tme_mediano = tme_values.median()
+            tme_medio = tme_values.mean()
     
     if "sla_30_ok" in df_laudos_real.columns:
         sla_30_percent = df_laudos_real["sla_30_ok"].mean() * 100
@@ -595,16 +814,36 @@ if df_laudos_real is not None and not df_laudos_real.empty:
     if "sla_60_ok" in df_laudos_real.columns:
         sla_60_percent = df_laudos_real["sla_60_ok"].mean() * 100
 
-# ============ EXIBIÇÃO DE KPIS ============
+# KPIs de aging (pendências)
+aging_laudos_medio = None
+aging_exames_medio = None
+
+if df_pend_laudos is not None and not df_pend_laudos.empty and "data_base" in df_pend_laudos.columns:
+    dates = pd.to_datetime(df_pend_laudos["data_base"], errors="coerce")
+    if dates.notna().any():
+        hoje = pd.Timestamp.now().normalize()
+        dias_pendentes = (hoje - dates).dt.days
+        aging_laudos_medio = dias_pendentes.mean()
+
+if df_pend_exames is not None and not df_pend_exames.empty and "data_base" in df_pend_exames.columns:
+    dates = pd.to_datetime(df_pend_exames["data_base"], errors="coerce")
+    if dates.notna().any():
+        hoje = pd.Timestamp.now().normalize()
+        dias_pendentes = (hoje - dates).dt.days
+        aging_exames_medio = dias_pendentes.mean()
+
+# ============ EXIBIÇÃO DE KPIS MELHORADOS ============
 st.subheader("📈 Indicadores Principais")
 
-# Primeira linha de KPIs
+# Primeira linha de KPIs - Produção
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
+    delta_atend = f"+{format_number(crescimento_atendimentos, 1)}%" if crescimento_atendimentos else None
     st.metric(
         "Atendimentos Totais",
         format_number(total_atendimentos),
+        delta=delta_atend,
         help="Total de atendimentos no período filtrado"
     )
 
@@ -619,7 +858,7 @@ with col2:
 
 with col3:
     st.metric(
-        "Taxa de Atendimento",
+        "Taxa de Conversão",
         f"{format_number(taxa_atendimento, 1)}%" if taxa_atendimento else "—",
         help="Percentual de atendimentos que resultaram em laudos"
     )
@@ -631,7 +870,8 @@ with col4:
         help="Média de laudos emitidos por mês"
     )
 
-# Segunda linha de KPIs
+# Segunda linha de KPIs - Pendências
+st.markdown("#### ⏰ Gestão de Pendências")
 col5, col6, col7, col8 = st.columns(4)
 
 with col5:
@@ -659,22 +899,37 @@ with col7:
     st.metric(
         "Backlog (meses)",
         format_number(backlog_meses, 1) if backlog_meses else "—",
-        help="Tempo estimado para liquidar pendências atuais"
+        help="Tempo estimado para liquidar pendências atuais baseado na produção média"
     )
 
 with col8:
+    aging_medio = aging_laudos_medio or aging_exames_medio
     st.metric(
-        "TME Mediano (dias)",
-        format_number(tme_mediano, 1) if tme_mediano else "—", 
-        help="Tempo mediano de execução dos laudos"
+        "Aging Médio (dias)",
+        format_number(aging_medio, 0) if aging_medio else "—",
+        help="Tempo médio de pendência dos processos em aberto"
     )
 
-# Terceira linha - SLAs
-if sla_30_percent is not None or sla_60_percent is not None:
-    st.markdown("#### 🎯 Indicadores de SLA")
+# Terceira linha - Performance e SLAs
+if tme_mediano is not None or sla_30_percent is not None:
+    st.markdown("#### 🎯 Indicadores de Performance")
     col9, col10, col11, col12 = st.columns(4)
     
     with col9:
+        st.metric(
+            "TME Mediano (dias)",
+            format_number(tme_mediano, 1) if tme_mediano else "—", 
+            help="Tempo mediano de execução dos laudos (mais robusto que a média)"
+        )
+    
+    with col10:
+        st.metric(
+            "TME Médio (dias)",
+            format_number(tme_medio, 1) if tme_medio else "—",
+            help="Tempo médio de execução dos laudos"
+        )
+    
+    with col11:
         sla_30_delta = "normal" if sla_30_percent and sla_30_percent >= 80 else "inverse"
         st.metric(
             "SLA 30 dias",
@@ -682,13 +937,39 @@ if sla_30_percent is not None or sla_60_percent is not None:
             help="Percentual de laudos emitidos em até 30 dias"
         )
     
-    with col10:
+    with col12:
         st.metric(
             "SLA 60 dias", 
             f"{format_number(sla_60_percent, 1)}%" if sla_60_percent else "—",
             help="Percentual de laudos emitidos em até 60 dias"
         )
 
+# Alertas e insights automáticos
+st.markdown("#### 🚨 Alertas e Insights")
+alerts = []
+
+if backlog_meses and backlog_meses > 6:
+    alerts.append("🔴 **Backlog crítico**: Mais de 6 meses para liquidar pendências")
+elif backlog_meses and backlog_meses > 3:
+    alerts.append("🟡 **Atenção**: Backlog de pendências acima de 3 meses")
+
+if sla_30_percent and sla_30_percent < 70:
+    alerts.append("🔴 **SLA 30 dias baixo**: Menos de 70% dos laudos emitidos no prazo")
+
+if taxa_atendimento and taxa_atendimento < 50:
+    alerts.append("🟡 **Taxa de conversão baixa**: Menos de 50% dos atendimentos resultam em laudos")
+
+if crescimento_laudos and crescimento_laudos < -10:
+    alerts.append("🔴 **Queda na produção**: Redução de mais de 10% nos laudos emitidos")
+
+if correlacao_atend_laudos and correlacao_atend_laudos < 0.5:
+    alerts.append("🟡 **Descorrelação**: Atendimentos e laudos não estão alinhados temporalmente")
+
+if alerts:
+    for alert in alerts:
+        st.markdown(alert)
+else:
+    st.success("✅ **Indicadores saudáveis**: Todos os KPIs estão dentro dos parâmetros esperados")
 st.markdown("---")
 
 # ============ ABAS DO DASHBOARD ============
@@ -703,78 +984,152 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 
 # ============ ABA 1: VISÃO GERAL ============
 with tab1:
-    st.subheader("Resumo Executivo")
+    st.subheader("📊 Resumo Executivo")
     
-    # Gráficos principais lado a lado
-    col_left, col_right = st.columns(2)
-    
-    with col_left:
-        if df_laudos_todos is not None and "unidade" in df_laudos_todos.columns:
-            unidade_summary = (
-                df_laudos_todos
-                .groupby("unidade", as_index=False)["quantidade"]
-                .sum()
-                .sort_values("quantidade", ascending=False)
-                .head(15)
-            )
-            
-            fig_unidades = px.bar(
-                unidade_summary,
-                x="quantidade", 
-                y="unidade",
-                orientation="h",
-                title="🏢 Top 15 Unidades - Laudos Emitidos",
-                color="quantidade",
-                color_continuous_scale="Blues"
-            )
-            fig_unidades.update_layout(height=500, showlegend=False)
-            st.plotly_chart(fig_unidades, use_container_width=True)
-    
-    with col_right:
-        if df_laudos_todos is not None and "tipo" in df_laudos_todos.columns:
-            tipo_summary = (
-                df_laudos_todos
-                .groupby("tipo", as_index=False)["quantidade"]
-                .sum()
-                .sort_values("quantidade", ascending=False)
-                .head(12)
-            )
-            
-            fig_tipos = px.pie(
-                tipo_summary,
-                values="quantidade",
-                names="tipo", 
-                title="🔍 Distribuição por Tipo de Perícia"
-            )
-            fig_tipos.update_traces(textposition='inside', textinfo='percent+label')
-            fig_tipos.update_layout(height=500)
-            st.plotly_chart(fig_tipos, use_container_width=True)
-    
-    # Estatísticas por diretoria
-    if df_laudos_todos is not None and "diretoria" in df_laudos_todos.columns:
-        st.markdown("#### 📊 Performance por Diretoria")
+    # Métricas de eficiência
+    if df_laudos_todos is not None and not df_laudos_todos.empty:
+        col_left, col_right = st.columns(2)
         
-        diretoria_stats = (
+        with col_left:
+            st.markdown("#### 🏢 Performance por Unidade")
+            
+            if "unidade" in df_laudos_todos.columns:
+                unidade_summary = (
+                    df_laudos_todos
+                    .groupby("unidade", as_index=False)["quantidade"]
+                    .sum()
+                    .sort_values("quantidade", ascending=False)
+                    .head(15)
+                )
+                
+                fig_unidades = px.bar(
+                    unidade_summary,
+                    x="quantidade", 
+                    y="unidade",
+                    orientation="h",
+                    title="Top 15 Unidades - Laudos Emitidos",
+                    color="quantidade",
+                    color_continuous_scale="Blues",
+                    text="quantidade"
+                )
+                fig_unidades.update_traces(texttemplate='%{text}', textposition='outside')
+                fig_unidades.update_layout(height=500, showlegend=False)
+                st.plotly_chart(fig_unidades, use_container_width=True)
+        
+        with col_right:
+            st.markdown("#### 🔍 Distribuição por Tipo")
+            
+            if "tipo" in df_laudos_todos.columns:
+                tipo_summary = (
+                    df_laudos_todos
+                    .groupby("tipo", as_index=False)["quantidade"]
+                    .sum()
+                    .sort_values("quantidade", ascending=False)
+                    .head(10)
+                )
+                
+                fig_tipos = px.pie(
+                    tipo_summary,
+                    values="quantidade",
+                    names="tipo", 
+                    title="Top 10 Tipos de Perícia"
+                )
+                fig_tipos.update_traces(textposition='inside', textinfo='percent+label')
+                fig_tipos.update_layout(height=500)
+                st.plotly_chart(fig_tipos, use_container_width=True)
+    
+    # Análise temporal consolidada
+    if (df_atend_todos is not None and df_laudos_todos is not None and 
+        "anomês_dt" in df_atend_todos.columns and "anomês_dt" in df_laudos_todos.columns):
+        
+        st.markdown("#### 📅 Evolução Temporal Consolidada")
+        
+        # Combina dados mensais
+        atend_monthly = (
+            df_atend_todos
+            .groupby("anomês_dt")["quantidade"]
+            .sum()
+            .reset_index()
+        )
+        atend_monthly["Tipo"] = "Atendimentos"
+        atend_monthly.rename(columns={"quantidade": "Total"}, inplace=True)
+        
+        laudos_monthly = (
             df_laudos_todos
-            .groupby("diretoria")
-            .agg({
-                "quantidade": ["sum", "count"],
-                "anomês_dt": ["min", "max"]
-            })
-            .round(2)
+            .groupby("anomês_dt")["quantidade"] 
+            .sum()
+            .reset_index()
+        )
+        laudos_monthly["Tipo"] = "Laudos"
+        laudos_monthly.rename(columns={"quantidade": "Total"}, inplace=True)
+        
+        combined_data = pd.concat([atend_monthly, laudos_monthly])
+        combined_data["Mês"] = combined_data["anomês_dt"].dt.strftime("%Y-%m")
+        
+        fig_temporal = px.line(
+            combined_data,
+            x="Mês",
+            y="Total",
+            color="Tipo",
+            markers=True,
+            title="Evolução Mensal: Atendimentos vs Laudos",
+            line_shape="spline"
         )
         
-        diretoria_stats.columns = ["Total Laudos", "Registros", "Início", "Fim"]
-        diretoria_stats = diretoria_stats.sort_values("Total Laudos", ascending=False)
+        fig_temporal.update_layout(
+            height=400,
+            hovermode="x unified",
+            xaxis_title="Período",
+            yaxis_title="Quantidade"
+        )
         
-        st.dataframe(diretoria_stats, use_container_width=True)
+        st.plotly_chart(fig_temporal, use_container_width=True)
+        
+        # Taxa de conversão ao longo do tempo
+        merged_monthly = pd.merge(
+            atend_monthly.rename(columns={"Total": "Atendimentos"}),
+            laudos_monthly.rename(columns={"Total": "Laudos"}),
+            on="anomês_dt",
+            how="inner"
+        )
+        
+        if not merged_monthly.empty:
+            merged_monthly["Taxa_Conversao"] = (
+                merged_monthly["Laudos"] / merged_monthly["Atendimentos"] * 100
+            )
+            merged_monthly["Mês"] = merged_monthly["anomês_dt"].dt.strftime("%Y-%m")
+            
+            fig_conversao = px.line(
+                merged_monthly,
+                x="Mês",
+                y="Taxa_Conversao",
+                markers=True,
+                title="Taxa de Conversão Mensal (%)",
+                line_shape="spline"
+            )
+            
+            # Adiciona linha de meta (70%)
+            fig_conversao.add_hline(
+                y=70, 
+                line_dash="dash", 
+                line_color="red",
+                annotation_text="Meta: 70%"
+            )
+            
+            fig_conversao.update_layout(
+                height=350,
+                yaxis_title="Taxa de Conversão (%)",
+                xaxis_title="Período"
+            )
+            
+            st.plotly_chart(fig_conversao, use_container_width=True)
 
 # ============ ABA 2: TENDÊNCIAS ============
 with tab2:
-    st.subheader("📈 Análise Temporal")
+    st.subheader("📈 Análise de Tendências")
     
-    def create_time_series_chart(df: pd.DataFrame, title: str, color: str = "blue") -> None:
-        """Cria gráfico de série temporal."""
+    def create_enhanced_time_series(df: pd.DataFrame, title: str, color: str = "blue") -> None:
+        """Cria gráfico de série temporal com análises avançadas."""
         if df is None or df.empty or "anomês_dt" not in df.columns:
             st.info(f"Dados insuficientes para {title}")
             return
@@ -789,19 +1144,29 @@ with tab2:
             st.info(f"Sem dados temporais para {title}")
             return
         
-        monthly_data["anomês"] = monthly_data["anomês_dt"].dt.strftime("%Y-%m")
+        monthly_data["Mês"] = monthly_data["anomês_dt"].dt.strftime("%Y-%m")
         
-        # Adiciona linha de tendência
-        fig = px.line(
-            monthly_data,
-            x="anomês",
-            y="quantidade", 
-            markers=True,
-            title=title,
-            line_shape="spline"
+        # Cria subplots
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=(title, "Variação Percentual Mensal"),
+            vertical_spacing=0.15,
+            row_heights=[0.7, 0.3]
         )
         
-        # Adiciona média móvel
+        # Gráfico principal com linha e média móvel
+        fig.add_trace(
+            go.Scatter(
+                x=monthly_data["Mês"],
+                y=monthly_data["quantidade"],
+                mode="lines+markers",
+                name="Valores",
+                line=dict(color=color, width=2)
+            ),
+            row=1, col=1
+        )
+        
+        # Média móvel (3 meses)
         if len(monthly_data) >= 3:
             monthly_data["media_movel"] = (
                 monthly_data["quantidade"]
@@ -809,20 +1174,42 @@ with tab2:
                 .mean()
             )
             
-            fig.add_scatter(
-                x=monthly_data["anomês"],
-                y=monthly_data["media_movel"],
-                mode="lines",
-                name="Média Móvel (3m)",
-                line=dict(dash="dash", color="red")
+            fig.add_trace(
+                go.Scatter(
+                    x=monthly_data["Mês"],
+                    y=monthly_data["media_movel"],
+                    mode="lines",
+                    name="Média Móvel (3m)",
+                    line=dict(dash="dash", color="red", width=2)
+                ),
+                row=1, col=1
             )
         
-        fig.update_layout(
-            height=400,
-            xaxis_title="Período",
-            yaxis_title="Quantidade",
-            hovermode="x unified"
+        # Variação percentual
+        monthly_data["variacao_pct"] = monthly_data["quantidade"].pct_change() * 100
+        
+        colors = ['red' if x < 0 else 'green' for x in monthly_data["variacao_pct"].fillna(0)]
+        
+        fig.add_trace(
+            go.Bar(
+                x=monthly_data["Mês"],
+                y=monthly_data["variacao_pct"],
+                name="Variação %",
+                marker_color=colors,
+                showlegend=False
+            ),
+            row=2, col=1
         )
+        
+        fig.update_layout(
+            height=600,
+            hovermode="x unified",
+            showlegend=True
+        )
+        
+        fig.update_xaxes(title_text="Período", row=2, col=1)
+        fig.update_yaxes(title_text="Quantidade", row=1, col=1)
+        fig.update_yaxes(title_text="Variação (%)", row=2, col=1)
         
         st.plotly_chart(fig, use_container_width=True)
     
@@ -830,120 +1217,181 @@ with tab2:
     col1, col2 = st.columns(2)
     
     with col1:
-        create_time_series_chart(
+        create_enhanced_time_series(
             df_atend_todos,
-            "🏥 Atendimentos - Evolução Mensal",
+            "🏥 Atendimentos - Análise Temporal",
             "blue"
         )
         
-        create_time_series_chart(
-            df_atend_esp,
-            "🏥 Atendimentos Específicos - Evolução",
-            "lightblue"
-        )
+        # Análise sazonal para atendimentos
+        if df_atend_todos is not None and "anomês_dt" in df_atend_todos.columns:
+            st.markdown("#### 📅 Sazonalidade - Atendimentos")
+            
+            seasonal_data = df_atend_todos.copy()
+            seasonal_data["mes_nome"] = seasonal_data["anomês_dt"].dt.month_name()
+            seasonal_data["mes_num"] = seasonal_data["anomês_dt"].dt.month
+            
+            monthly_totals = (
+                seasonal_data
+                .groupby(["mes_num", "mes_nome"])["quantidade"]
+                .sum()
+                .reset_index()
+                .sort_values("mes_num")
+            )
+            
+            fig_sazonal = px.bar(
+                monthly_totals,
+                x="mes_nome",
+                y="quantidade",
+                title="Distribuição Sazonal",
+                color="quantidade",
+                color_continuous_scale="Blues"
+            )
+            
+            fig_sazonal.update_layout(height=300, showlegend=False)
+            st.plotly_chart(fig_sazonal, use_container_width=True)
     
     with col2:
-        create_time_series_chart(
+        create_enhanced_time_series(
             df_laudos_todos,
-            "📄 Laudos - Evolução Mensal", 
+            "📄 Laudos - Análise Temporal", 
             "green"
         )
         
-        create_time_series_chart(
-            df_laudos_esp,
-            "📄 Laudos Específicos - Evolução",
-            "lightgreen"
-        )
+        # Análise sazonal para laudos
+        if df_laudos_todos is not None and "anomês_dt" in df_laudos_todos.columns:
+            st.markdown("#### 📅 Sazonalidade - Laudos")
+            
+            seasonal_data = df_laudos_todos.copy()
+            seasonal_data["mes_nome"] = seasonal_data["anomês_dt"].dt.month_name()
+            seasonal_data["mes_num"] = seasonal_data["anomês_dt"].dt.month
+            
+            monthly_totals = (
+                seasonal_data
+                .groupby(["mes_num", "mes_nome"])["quantidade"]
+                .sum()
+                .reset_index()
+                .sort_values("mes_num")
+            )
+            
+            fig_sazonal = px.bar(
+                monthly_totals,
+                x="mes_nome",
+                y="quantidade",
+                title="Distribuição Sazonal",
+                color="quantidade",
+                color_continuous_scale="Greens"
+            )
+            
+            fig_sazonal.update_layout(height=300, showlegend=False)
+            st.plotly_chart(fig_sazonal, use_container_width=True)
     
-    # Gráfico comparativo
+    # Análise de correlação
     if (df_atend_todos is not None and df_laudos_todos is not None and 
         "anomês_dt" in df_atend_todos.columns and "anomês_dt" in df_laudos_todos.columns):
         
-        st.markdown("#### 📊 Comparativo: Atendimentos vs Laudos")
+        st.markdown("#### 🔗 Análise de Correlação")
         
-        atend_monthly = (
-            df_atend_todos
-            .groupby("anomês_dt")["quantidade"]
-            .sum()
-            .reset_index()
-        )
-        atend_monthly["tipo"] = "Atendimentos"
+        atend_monthly = df_atend_todos.groupby("anomês_dt")["quantidade"].sum()
+        laudos_monthly = df_laudos_todos.groupby("anomês_dt")["quantidade"].sum()
         
-        laudos_monthly = (
-            df_laudos_todos
-            .groupby("anomês_dt")["quantidade"] 
-            .sum()
-            .reset_index()
-        )
-        laudos_monthly["tipo"] = "Laudos"
+        # Períodos em comum
+        common_periods = atend_monthly.index.intersection(laudos_monthly.index)
         
-        combined_data = pd.concat([atend_monthly, laudos_monthly])
-        combined_data["anomês"] = combined_data["anomês_dt"].dt.strftime("%Y-%m")
-        
-        fig_combined = px.line(
-            combined_data,
-            x="anomês",
-            y="quantidade",
-            color="tipo",
-            markers=True,
-            title="Comparativo Mensal: Atendimentos vs Laudos"
-        )
-        
-        fig_combined.update_layout(height=450, hovermode="x unified")
-        st.plotly_chart(fig_combined, use_container_width=True)
+        if len(common_periods) > 3:
+            correlation_data = pd.DataFrame({
+                "Atendimentos": atend_monthly.loc[common_periods],
+                "Laudos": laudos_monthly.loc[common_periods]
+            }).reset_index()
+            
+            correlation_data["Período"] = correlation_data["anomês_dt"].dt.strftime("%Y-%m")
+            
+            fig_scatter = px.scatter(
+                correlation_data,
+                x="Atendimentos",
+                y="Laudos",
+                hover_data=["Período"],
+                title="Correlação: Atendimentos vs Laudos",
+                trendline="ols"
+            )
+            
+            correlation_coef = correlation_data["Atendimentos"].corr(correlation_data["Laudos"])
+            fig_scatter.add_annotation(
+                text=f"Correlação: {correlation_coef:.3f}",
+                xref="paper", yref="paper",
+                x=0.02, y=0.98,
+                showarrow=False,
+                bgcolor="rgba(255,255,255,0.8)"
+            )
+            
+            fig_scatter.update_layout(height=400)
+            st.plotly_chart(fig_scatter, use_container_width=True)
 
 # ============ ABA 3: RANKINGS ============
 with tab3:
     st.subheader("🏆 Rankings e Comparativos")
     
-    def create_ranking_chart(df: pd.DataFrame, dimension: str, title: str, top_n: int = 20) -> None:
-        """Cria gráfico de ranking."""
+    def create_enhanced_ranking(df: pd.DataFrame, dimension: str, title: str, top_n: int = 20) -> None:
+        """Cria gráfico de ranking com informações adicionais."""
         if df is None or df.empty or dimension not in df.columns:
             st.info(f"Dados insuficientes para {title}")
             return
         
         ranking_data = (
-            df.groupby(dimension, as_index=False)["quantidade"]
-            .sum()
-            .sort_values("quantidade", ascending=False)
-            .head(top_n)
+            df.groupby(dimension)
+            .agg({
+                "quantidade": ["sum", "count", "mean"]
+            })
+            .round(2)
         )
+        
+        ranking_data.columns = ["Total", "Registros", "Média"]
+        ranking_data = ranking_data.sort_values("Total", ascending=False).head(top_n)
+        ranking_data.reset_index(inplace=True)
         
         if ranking_data.empty:
             st.info(f"Sem dados para {title}")
             return
         
+        # Gráfico principal
         fig = px.bar(
             ranking_data,
-            x="quantidade",
+            x="Total",
             y=dimension,
             orientation="h",
             title=title,
-            color="quantidade",
-            color_continuous_scale="Viridis"
+            color="Total",
+            color_continuous_scale="Viridis",
+            hover_data=["Registros", "Média"]
         )
         
         fig.update_layout(
-            height=max(400, len(ranking_data) * 25),
+            height=max(400, len(ranking_data) * 30),
             showlegend=False,
             yaxis={"categoryorder": "total ascending"}
         )
         
         st.plotly_chart(fig, use_container_width=True)
+        
+        # Tabela de detalhes
+        with st.expander(f"📊 Detalhes - {title}"):
+            st.dataframe(ranking_data, use_container_width=True)
     
     # Rankings em abas
-    rank_tab1, rank_tab2, rank_tab3 = st.tabs(["Por Diretoria", "Por Unidade", "Por Tipo"])
+    rank_tab1, rank_tab2, rank_tab3, rank_tab4 = st.tabs([
+        "Por Diretoria", "Por Unidade", "Por Tipo", "Comparativo"
+    ])
     
     with rank_tab1:
         col1, col2 = st.columns(2)
         with col1:
-            create_ranking_chart(
+            create_enhanced_ranking(
                 df_atend_todos,
                 "diretoria", 
                 "🏥 Atendimentos por Diretoria"
             )
         with col2:
-            create_ranking_chart(
+            create_enhanced_ranking(
                 df_laudos_todos,
                 "diretoria",
                 "📄 Laudos por Diretoria"
@@ -952,14 +1400,14 @@ with tab3:
     with rank_tab2:
         col1, col2 = st.columns(2)
         with col1:
-            create_ranking_chart(
+            create_enhanced_ranking(
                 df_atend_todos,
                 "unidade",
                 "🏥 Atendimentos por Unidade",
                 25
             )
         with col2:
-            create_ranking_chart(
+            create_enhanced_ranking(
                 df_laudos_todos,
                 "unidade", 
                 "📄 Laudos por Unidade",
@@ -967,12 +1415,723 @@ with tab3:
             )
     
     with rank_tab3:
-        create_ranking_chart(
-            df_laudos_todos,
-            "tipo",
-            "📄 Laudos por Tipo de Perícia",
-            30
+        col1, col2 = st.columns(2)
+        with col1:
+            create_enhanced_ranking(
+                df_atend_esp,
+                "tipo",
+                "🏥 Atendimentos por Tipo",
+                20
+            )
+        with col2:
+            create_enhanced_ranking(
+                df_laudos_esp,
+                "tipo",
+                "📄 Laudos por Tipo",
+                20
+            )
+    
+    with rank_tab4:
+        st.markdown("#### 📊 Análise Comparativa de Eficiência")
+        
+        # Compara eficiência por unidade
+        if (df_atend_todos is not None and df_laudos_todos is not None and
+            "unidade" in df_atend_todos.columns and "unidade" in df_laudos_todos.columns):
+            
+            atend_por_unidade = (
+                df_atend_todos
+                .groupby("unidade")["quantidade"]
+                .sum()
+                .reset_index()
+                .rename(columns={"quantidade": "Atendimentos"})
+            )
+            
+            laudos_por_unidade = (
+                df_laudos_todos
+                .groupby("unidade")["quantidade"]
+                .sum()
+                .reset_index()
+                .rename(columns={"quantidade": "Laudos"})
+            )
+            
+            eficiencia_data = pd.merge(
+                atend_por_unidade,
+                laudos_por_unidade,
+                on="unidade",
+                how="inner"
+            )
+            
+            if not eficiencia_data.empty:
+                eficiencia_data["Taxa_Conversao"] = (
+                    eficiencia_data["Laudos"] / eficiencia_data["Atendimentos"] * 100
+                )
+                eficiencia_data = eficiencia_data.sort_values("Taxa_Conversao", ascending=False)
+                
+                fig_eficiencia = px.scatter(
+                    eficiencia_data.head(20),
+                    x="Atendimentos",
+                    y="Laudos",
+                    size="Taxa_Conversao",
+                    hover_name="unidade",
+                    title="Eficiência por Unidade (Atendimentos vs Laudos)",
+                    color="Taxa_Conversao",
+                    color_continuous_scale="RdYlGn"
+                )
+                
+                fig_eficiencia.update_layout(height=500)
+                st.plotly_chart(fig_eficiencia, use_container_width=True)
+                
+                # Top 10 mais eficientes
+                st.markdown("**🥇 Top 10 Unidades Mais Eficientes:**")
+                top_eficientes = eficiencia_data.head(10)[["unidade", "Taxa_Conversao", "Atendimentos", "Laudos"]]
+                st.dataframe(top_eficientes, use_container_width=True)
+
+# ============ ABA 4: PENDÊNCIAS ============
+with tab4:
+    st.subheader("⏰ Gestão de Pendências")
+    
+    def calculate_aging_analysis(df: pd.DataFrame, date_column: str = "data_base") -> Tuple[pd.DataFrame, pd.Series, Dict]:
+        """Calcula aging das pendências com análises detalhadas."""
+        if df is None or df.empty:
+            return pd.DataFrame(), pd.Series(dtype="int64"), {}
+        
+        # Busca coluna de data válida
+        available_date_columns = [col for col in df.columns if "data" in col.lower()]
+        if date_column not in df.columns and available_date_columns:
+            date_column = available_date_columns[0]
+        
+        if date_column not in df.columns:
+            return df, pd.Series(dtype="int64"), {}
+        
+        result = df.copy()
+        dates = pd.to_datetime(result[date_column], errors="coerce")
+        
+        if dates.isna().all():
+            return df, pd.Series(dtype="int64"), {}
+        
+        hoje = pd.Timestamp.now().normalize()
+        dias_pendentes = (hoje - dates).dt.days
+        
+        # Categorias de aging mais detalhadas
+        faixas_aging = pd.cut(
+            dias_pendentes,
+            bins=[-1, 15, 30, 60, 90, 180, 365, float('inf')],
+            labels=["0-15 dias", "16-30 dias", "31-60 dias", 
+                   "61-90 dias", "91-180 dias", "181-365 dias", "> 365 dias"]
         )
+        
+        result["dias_pendentes"] = dias_pendentes
+        result["faixa_aging"] = faixas_aging
+        
+        # Cria categoria de prioridade
+        result["prioridade"] = pd.cut(
+            dias_pendentes,
+            bins=[-1, 30, 90, 180, float('inf')],
+            labels=["Normal", "Atenção", "Urgente", "Crítico"]
+        )
+        
+        distribuicao = faixas_aging.value_counts().sort_index()
+        
+        # Estatísticas adicionais
+        stats = {
+            "total": len(result),
+            "media_dias": dias_pendentes.mean(),
+            "mediana_dias": dias_pendentes.median(),
+            "max_dias": dias_pendentes.max(),
+            "criticos": len(result[result["prioridade"] == "Crítico"]),
+            "urgentes": len(result[result["prioridade"] == "Urgente"])
+        }
+        
+        return result, distribuicao, stats
+    
+    # Análise de Laudos Pendentes
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 📄 Laudos Pendentes")
+        
+        if df_pend_laudos is not None and not df_pend_laudos.empty:
+            laudos_aged, dist_laudos, stats_laudos = calculate_aging_analysis(df_pend_laudos)
+            
+            # Métricas principais
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                st.metric("Total", format_number(stats_laudos.get("total", 0)))
+            with col_b:
+                st.metric("Críticos", stats_laudos.get("criticos", 0))
+            with col_c:
+                st.metric("Média (dias)", format_number(stats_laudos.get("media_dias", 0), 1))
+            
+            # Gráfico de distribuição por aging
+            if not dist_laudos.empty:
+                fig_aging_laudos = px.bar(
+                    x=dist_laudos.index,
+                    y=dist_laudos.values,
+                    title="Distribuição por Tempo de Pendência",
+                    color=dist_laudos.values,
+                    color_continuous_scale="Reds",
+                    text=dist_laudos.values
+                )
+                fig_aging_laudos.update_traces(texttemplate='%{text}', textposition='outside')
+                fig_aging_laudos.update_layout(
+                    height=350,
+                    showlegend=False,
+                    xaxis_title="Faixa de Dias",
+                    yaxis_title="Quantidade"
+                )
+                st.plotly_chart(fig_aging_laudos, use_container_width=True)
+            
+            # Gráfico de prioridades
+            if "prioridade" in laudos_aged.columns:
+                prioridade_dist = laudos_aged["prioridade"].value_counts()
+                
+                fig_prioridade = px.pie(
+                    values=prioridade_dist.values,
+                    names=prioridade_dist.index,
+                    title="Distribuição por Prioridade",
+                    color_discrete_map={
+                        "Normal": "green",
+                        "Atenção": "yellow", 
+                        "Urgente": "orange",
+                        "Crítico": "red"
+                    }
+                )
+                fig_prioridade.update_layout(height=300)
+                st.plotly_chart(fig_prioridade, use_container_width=True)
+            
+            # Top pendências mais antigas
+            st.markdown("**🔴 Top 10 Mais Antigas:**")
+            if "dias_pendentes" in laudos_aged.columns:
+                oldest = (
+                    laudos_aged
+                    .nlargest(10, "dias_pendentes")
+                    [["id", "unidade", "tipo", "dias_pendentes", "prioridade"]]
+                    if all(col in laudos_aged.columns for col in ["id", "unidade", "tipo"])
+                    else laudos_aged.nlargest(10, "dias_pendentes")
+                )
+                st.dataframe(oldest, use_container_width=True, height=250)
+        else:
+            st.info("Sem dados de laudos pendentes disponíveis.")
+    
+    with col2:
+        st.markdown("#### 🔬 Exames Pendentes")
+        
+        if df_pend_exames is not None and not df_pend_exames.empty:
+            exames_aged, dist_exames, stats_exames = calculate_aging_analysis(df_pend_exames)
+            
+            # Métricas principais
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                st.metric("Total", format_number(stats_exames.get("total", 0)))
+            with col_b:
+                st.metric("Críticos", stats_exames.get("criticos", 0))
+            with col_c:
+                st.metric("Média (dias)", format_number(stats_exames.get("media_dias", 0), 1))
+            
+            # Gráfico de distribuição por aging
+            if not dist_exames.empty:
+                fig_aging_exames = px.bar(
+                    x=dist_exames.index,
+                    y=dist_exames.values,
+                    title="Distribuição por Tempo de Pendência",
+                    color=dist_exames.values,
+                    color_continuous_scale="Oranges",
+                    text=dist_exames.values
+                )
+                fig_aging_exames.update_traces(texttemplate='%{text}', textposition='outside')
+                fig_aging_exames.update_layout(
+                    height=350,
+                    showlegend=False,
+                    xaxis_title="Faixa de Dias",
+                    yaxis_title="Quantidade"
+                )
+                st.plotly_chart(fig_aging_exames, use_container_width=True)
+            
+            # Gráfico de prioridades
+            if "prioridade" in exames_aged.columns:
+                prioridade_dist = exames_aged["prioridade"].value_counts()
+                
+                fig_prioridade = px.pie(
+                    values=prioridade_dist.values,
+                    names=prioridade_dist.index,
+                    title="Distribuição por Prioridade",
+                    color_discrete_map={
+                        "Normal": "green",
+                        "Atenção": "yellow",
+                        "Urgente": "orange", 
+                        "Crítico": "red"
+                    }
+                )
+                fig_prioridade.update_layout(height=300)
+                st.plotly_chart(fig_prioridade, use_container_width=True)
+            
+            # Top pendências mais antigas
+            st.markdown("**🔴 Top 10 Mais Antigas:**")
+            if "dias_pendentes" in exames_aged.columns:
+                oldest = (
+                    exames_aged
+                    .nlargest(10, "dias_pendentes")
+                    [["id", "unidade", "tipo", "dias_pendentes", "prioridade"]]
+                    if all(col in exames_aged.columns for col in ["id", "unidade", "tipo"])
+                    else exames_aged.nlargest(10, "dias_pendentes")
+                )
+                st.dataframe(oldest, use_container_width=True, height=250)
+        else:
+            st.info("Sem dados de exames pendentes disponíveis.")
+    
+    # Análise consolidada por unidade
+    st.markdown("#### 🏢 Análise de Pendências por Unidade")
+    
+    pendencias_por_unidade = []
+    
+    # Processa laudos pendentes
+    if df_pend_laudos is not None and "unidade" in df_pend_laudos.columns:
+        laudos_unidade = (
+            df_pend_laudos.groupby("unidade")
+            .agg({
+                "quantidade": "count" if "quantidade" in df_pend_laudos.columns else lambda x: len(x)
+            })
+            .rename(columns={"quantidade": "Laudos_Pendentes"})
+            .reset_index()
+        )
+        if "Laudos_Pendentes" not in laudos_unidade.columns:
+            laudos_unidade["Laudos_Pendentes"] = df_pend_laudos.groupby("unidade").size().values
+        pendencias_por_unidade.append(laudos_unidade)
+    
+    # Processa exames pendentes
+    if df_pend_exames is not None and "unidade" in df_pend_exames.columns:
+        exames_unidade = (
+            df_pend_exames.groupby("unidade")
+            .agg({
+                "quantidade": "count" if "quantidade" in df_pend_exames.columns else lambda x: len(x)
+            })
+            .rename(columns={"quantidade": "Exames_Pendentes"})
+            .reset_index()
+        )
+        if "Exames_Pendentes" not in exames_unidade.columns:
+            exames_unidade["Exames_Pendentes"] = df_pend_exames.groupby("unidade").size().values
+        pendencias_por_unidade.append(exames_unidade)
+    
+    if pendencias_por_unidade:
+        from functools import reduce
+        
+        pendencias_consolidadas = reduce(
+            lambda left, right: pd.merge(left, right, on="unidade", how="outer"),
+            pendencias_por_unidade
+        ).fillna(0)
+        
+        pendencias_consolidadas["Total_Pendencias"] = (
+            pendencias_consolidadas.get("Laudos_Pendentes", 0) + 
+            pendencias_consolidadas.get("Exames_Pendentes", 0)
+        )
+        
+        pendencias_consolidadas = pendencias_consolidadas.sort_values("Total_Pendencias", ascending=False)
+        
+        # Gráfico de barras empilhadas
+        fig_pendencias = go.Figure()
+        
+        if "Laudos_Pendentes" in pendencias_consolidadas.columns:
+            fig_pendencias.add_trace(go.Bar(
+                name='Laudos Pendentes',
+                y=pendencias_consolidadas["unidade"].head(15),
+                x=pendencias_consolidadas["Laudos_Pendentes"].head(15),
+                orientation='h',
+                marker_color='lightcoral'
+            ))
+        
+        if "Exames_Pendentes" in pendencias_consolidadas.columns:
+            fig_pendencias.add_trace(go.Bar(
+                name='Exames Pendentes',
+                y=pendencias_consolidadas["unidade"].head(15),
+                x=pendencias_consolidadas["Exames_Pendentes"].head(15),
+                orientation='h',
+                marker_color='lightsalmon'
+            ))
+        
+        fig_pendencias.update_layout(
+            title="Top 15 Unidades com Mais Pendências",
+            barmode='stack',
+            height=500,
+            xaxis_title="Quantidade de Pendências",
+            yaxis={'categoryorder': 'total ascending'}
+        )
+        
+        st.plotly_chart(fig_pendencias, use_container_width=True)
+        
+        # Tabela de detalhes
+        st.markdown("**📊 Detalhamento por Unidade:**")
+        st.dataframe(
+            pendencias_consolidadas.head(20),
+            use_container_width=True,
+            height=300
+        )
+
+# ============ ABA 5: DADOS ============
+with tab5:
+    st.subheader("📋 Exploração dos Dados")
+    
+    # Resumo geral dos datasets
+    st.markdown("#### 📊 Resumo dos Datasets Carregados")
+    
+    data_summary = []
+    for name, df in standardized_dfs.items():
+        if df is not None and not df.empty:
+            periodo_info = "Sem dados temporais"
+            if 'anomês' in df.columns and not df['anomês'].isna().all():
+                min_periodo = df['anomês'].min()
+                max_periodo = df['anomês'].max()
+                periodo_info = f"{min_periodo} a {max_periodo}"
+            
+            data_summary.append({
+                "Dataset": name.replace("_", " ").title(),
+                "Registros": f"{len(df):,}".replace(",", "."),
+                "Colunas": len(df.columns),
+                "Período": periodo_info,
+                "Tamanho (MB)": round(df.memory_usage(deep=True).sum() / 1024 / 1024, 2),
+                "Status": "✅ Carregado"
+            })
+    
+    if data_summary:
+        summary_df = pd.DataFrame(data_summary)
+        st.dataframe(summary_df, use_container_width=True)
+        
+        # Estatísticas gerais
+        total_registros = sum(int(row["Registros"].replace(".", "")) for row in data_summary)
+        total_tamanho = sum(row["Tamanho (MB)"] for row in data_summary)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total de Registros", f"{total_registros:,}".replace(",", "."))
+        with col2:
+            st.metric("Datasets Carregados", len(data_summary))
+        with col3:
+            st.metric("Tamanho Total (MB)", f"{total_tamanho:.1f}")
+        with col4:
+            avg_size = total_tamanho / len(data_summary) if data_summary else 0
+            st.metric("Tamanho Médio (MB)", f"{avg_size:.1f}")
+    
+    st.markdown("#### 🔍 Exploração Detalhada")
+    
+    # Seletor de dataset
+    available_datasets = [name for name, df in standardized_dfs.items() if df is not None]
+    
+    if available_datasets:
+        selected_dataset = st.selectbox(
+            "Selecione o dataset para explorar:",
+            available_datasets,
+            format_func=lambda x: x.replace("_", " ").title(),
+            help="Escolha qual conjunto de dados deseja analisar em detalhes"
+        )
+        
+        if selected_dataset:
+            df_selected = standardized_dfs[selected_dataset]
+            
+            # Informações básicas do dataset
+            st.markdown(f"#### 📄 {selected_dataset.replace('_', ' ').title()}")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Registros", f"{len(df_selected):,}".replace(",", "."))
+            with col2:
+                st.metric("Colunas", len(df_selected.columns))
+            with col3:
+                valores_nulos = df_selected.isnull().sum().sum()
+                st.metric("Valores Nulos", f"{valores_nulos:,}".replace(",", "."))
+            with col4:
+                if 'anomês_dt' in df_selected.columns:
+                    unique_months = df_selected['anomês_dt'].nunique()
+                    st.metric("Meses Únicos", unique_months)
+                else:
+                    st.metric("Período", "N/A")
+            
+            # Análise de qualidade dos dados
+            with st.expander("🔍 Análise de Qualidade dos Dados", expanded=False):
+                quality_info = []
+                
+                for col in df_selected.columns:
+                    dtype = str(df_selected[col].dtype)
+                    null_count = df_selected[col].isnull().sum()
+                    null_percent = (null_count / len(df_selected)) * 100
+                    unique_count = df_selected[col].nunique()
+                    
+                    # Determina qualidade da coluna
+                    if null_percent == 0:
+                        quality = "🟢 Excelente"
+                    elif null_percent < 5:
+                        quality = "🟡 Boa"
+                    elif null_percent < 20:
+                        quality = "🟠 Regular"
+                    else:
+                        quality = "🔴 Ruim"
+                    
+                    quality_info.append({
+                        "Coluna": col,
+                        "Tipo": dtype,
+                        "Nulos": f"{null_count:,}".replace(",", "."),
+                        "% Nulos": f"{null_percent:.1f}%",
+                        "Únicos": f"{unique_count:,}".replace(",", "."),
+                        "Qualidade": quality
+                    })
+                
+                quality_df = pd.DataFrame(quality_info)
+                st.dataframe(quality_df, use_container_width=True)
+            
+            # Filtros para visualização
+            st.markdown("**🎛️ Controles de Visualização:**")
+            
+            viz_col1, viz_col2, viz_col3 = st.columns(3)
+            
+            with viz_col1:
+                max_rows = st.number_input(
+                    "Máximo de linhas:",
+                    min_value=10,
+                    max_value=5000,
+                    value=500,
+                    step=50,
+                    help="Número máximo de linhas a exibir"
+                )
+            
+            with viz_col2:
+                if 'anomês' in df_selected.columns:
+                    available_months = sorted(df_selected['anomês'].dropna().unique(), reverse=True)
+                    selected_months = st.multiselect(
+                        "Filtrar por período:",
+                        available_months,
+                        default=available_months[:6] if len(available_months) > 6 else available_months,
+                        help="Selecione os meses para análise"
+                    )
+                else:
+                    selected_months = []
+            
+            with viz_col3:
+                # Filtro por colunas
+                all_columns = list(df_selected.columns)
+                selected_columns = st.multiselect(
+                    "Colunas a exibir:",
+                    all_columns,
+                    default=all_columns[:10] if len(all_columns) > 10 else all_columns,
+                    help="Selecione as colunas para visualização"
+                )
+            
+            # Aplica filtros
+            df_display = df_selected.copy()
+            
+            if selected_months and 'anomês' in df_display.columns:
+                df_display = df_display[df_display['anomês'].isin(selected_months)]
+            
+            if selected_columns:
+                df_display = df_display[selected_columns]
+            
+            df_display = df_display.head(max_rows)
+            
+            # Estatísticas descritivas
+            if not df_display.empty:
+                st.markdown("**📈 Estatísticas Descritivas:**")
+                
+                # Apenas colunas numéricas
+                numeric_cols = df_display.select_dtypes(include=[np.number]).columns
+                
+                if len(numeric_cols) > 0:
+                    stats = df_display[numeric_cols].describe().round(2)
+                    st.dataframe(stats, use_container_width=True)
+                else:
+                    st.info("Nenhuma coluna numérica encontrada para estatísticas.")
+            
+            # Exibe os dados
+            st.markdown(f"**📋 Dados Filtrados ({len(df_display):,} de {len(df_selected):,} registros):**".replace(",", "."))
+            st.dataframe(
+                df_display,
+                use_container_width=True,
+                height=400
+            )
+            
+            # Opções de download
+            col_down1, col_down2 = st.columns(2)
+            
+            with col_down1:
+                # Download dos dados filtrados
+                csv_data = df_display.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Dados Filtrados (CSV)",
+                    data=csv_data,
+                    file_name=f"{selected_dataset}_filtrado_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv",
+                    help="Baixa apenas os dados atualmente visíveis"
+                )
+            
+            with col_down2:
+                # Download do dataset completo
+                csv_complete = df_selected.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Dataset Completo (CSV)",
+                    data=csv_complete,
+                    file_name=f"{selected_dataset}_completo_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv",
+                    help="Baixa o dataset completo sem filtros"
+                )
+
+# ============ ABA 6: RELATÓRIOS ============
+with tab6:
+    st.subheader("📑 Relatórios Executivos")
+    
+    # Seletor de tipo de relatório
+    tipo_relatorio = st.selectbox(
+        "Tipo de Relatório:",
+        [
+            "Relatório Executivo Completo",
+            "Relatório de Produção",
+            "Relatório de Pendências", 
+            "Relatório de Performance",
+            "Relatório Comparativo"
+        ],
+        help="Escolha o tipo de relatório que deseja gerar"
+    )
+    
+    # Função para gerar relatórios
+    def gerar_relatorio_executivo() -> str:
+        """Gera relatório executivo completo."""
+        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        
+        relatorio = f"""
+# RELATÓRIO EXECUTIVO PCI/SC
+**Data de Geração:** {timestamp}
+**Período de Análise:** {filter_periodo}
+
+## 📊 RESUMO EXECUTIVO
+
+### Indicadores Principais
+- **Atendimentos Totais:** {format_number(total_atendimentos)}
+- **Laudos Emitidos:** {format_number(total_laudos)}
+- **Taxa de Conversão:** {format_number(taxa_atendimento, 1) if taxa_atendimento else 'N/A'}%
+- **Produtividade Mensal:** {format_number(media_mensal_laudos, 1) if media_mensal_laudos else 'N/A'} laudos/mês
+
+### Gestão de Pendências
+- **Laudos Pendentes:** {format_number(total_pend_laudos)}
+- **Exames Pendentes:** {format_number(total_pend_exames)}
+- **Backlog Estimado:** {format_number(backlog_meses, 1) if backlog_meses else 'N/A'} meses
+- **Aging Médio:** {format_number(aging_laudos_medio or aging_exames_medio, 0) if (aging_laudos_medio or aging_exames_medio) else 'N/A'} dias
+
+### Performance Operacional
+- **TME Mediano:** {format_number(tme_mediano, 1) if tme_mediano else 'N/A'} dias
+- **SLA 30 dias:** {format_number(sla_30_percent, 1) if sla_30_percent else 'N/A'}%
+- **SLA 60 dias:** {format_number(sla_60_percent, 1) if sla_60_percent else 'N/A'}%
+
+## 📈 ANÁLISE DE TENDÊNCIAS
+"""
+        
+        # Adiciona análise de crescimento
+        if crescimento_laudos is not None:
+            if crescimento_laudos > 5:
+                relatorio += f"- **Crescimento Positivo:** Laudos cresceram {format_number(crescimento_laudos, 1)}% no período\n"
+            elif crescimento_laudos < -5:
+                relatorio += f"- **Alerta:** Laudos decresceram {format_number(abs(crescimento_laudos), 1)}% no período\n"
+            else:
+                relatorio += f"- **Estabilidade:** Variação de {format_number(crescimento_laudos, 1)}% nos laudos\n"
+        
+        # Adiciona alertas
+        relatorio += "\n## 🚨 ALERTAS E RECOMENDAÇÕES\n"
+        
+        alertas_relatorio = []
+        
+        if backlog_meses and backlog_meses > 6:
+            alertas_relatorio.append("🔴 **CRÍTICO:** Backlog superior a 6 meses - necessário plano de ação imediato")
+        elif backlog_meses and backlog_meses > 3:
+            alertas_relatorio.append("🟡 **ATENÇÃO:** Backlog entre 3-6 meses - monitorar tendência")
+        
+        if sla_30_percent and sla_30_percent < 70:
+            alertas_relatorio.append("🔴 **CRÍTICO:** SLA 30 dias abaixo de 70% - revisar processos")
+        
+        if taxa_atendimento and taxa_atendimento < 50:
+            alertas_relatorio.append("🟡 **ATENÇÃO:** Taxa de conversão baixa - analisar gargalos")
+        
+        if alertas_relatorio:
+            relatorio += "\n".join(alertas_relatorio)
+        else:
+            relatorio += "✅ **Situação Normal:** Todos os indicadores dentro dos parâmetros esperados"
+        
+        relatorio += f"""
+
+## 📋 DATASETS UTILIZADOS
+"""
+        
+        for name, df in standardized_dfs.items():
+            if df is not None and not df.empty:
+                relatorio += f"- **{name.replace('_', ' ').title()}:** {len(df):,} registros\n"
+        
+        relatorio += f"""
+
+---
+*Relatório gerado automaticamente pelo Dashboard PCI/SC*
+*Sistema de Monitoramento de Produção e Pendências*
+        """
+        
+        return relatorio.strip()
+    
+    # Gera relatório baseado na seleção
+    if tipo_relatorio == "Relatório Executivo Completo":
+        relatorio_texto = gerar_relatorio_executivo()
+        
+        st.markdown("#### 📄 Visualização do Relatório")
+        st.markdown(relatorio_texto)
+        
+        # Download do relatório
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        st.download_button(
+            label="📥 Download Relatório Executivo",
+            data=relatorio_texto.encode('utf-8'),
+            file_name=f"relatorio_executivo_pci_sc_{timestamp}.md",
+            mime="text/markdown",
+            help="Baixa o relatório em formato Markdown"
+        )
+    
+    elif tipo_relatorio == "Relatório de Produção":
+        st.markdown("#### 📊 Relatório de Produção")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Métricas de Produção:**")
+            if df_laudos_todos is not None:
+                prod_mensal = (
+                    df_laudos_todos
+                    .groupby("anomês")["quantidade"]
+                    .sum()
+                    .reset_index()
+                    .sort_values("anomês")
+                )
+                
+                st.line_chart(
+                    prod_mensal.set_index("anomês")["quantidade"],
+                    height=300
+                )
+        
+        with col2:
+            st.markdown("**Top Produtores:**")
+            if df_laudos_todos is not None and "unidade" in df_laudos_todos.columns:
+                top_unidades = (
+                    df_laudos_todos
+                    .groupby("unidade")["quantidade"]
+                    .sum()
+                    .sort_values(ascending=False)
+                    .head(10)
+                )
+                
+                st.bar_chart(top_unidades, height=300)
+    
+    # Continua com outros tipos de relatório...
+    else:
+        st.info(f"Relatório '{tipo_relatorio}' em desenvolvimento.")
+
+# ============ RODAPÉ ============
+st.markdown("---")
+st.markdown("""
+<div style='text-align: center; color: #666; font-size: 14px; padding: 20px;'>
+    <p><strong>Dashboard PCI/SC v2.0</strong> - Sistema Avançado de Monitoramento</p>
+    <p>📊 Produção • ⏰ Pendências • 📈 Performance • 📋 Gestão</p>
+    <p>Para suporte técnico ou sugestões: <strong>equipe-ti@pci.sc.gov.br</strong></p>
+    <p><em>Última atualização: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</em></p>
+</div>
+""", unsafe_allow_html=True)
 
 # ============ ABA 4: PENDÊNCIAS ============
 with tab4:
