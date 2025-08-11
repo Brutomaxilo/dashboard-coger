@@ -2200,7 +2200,9 @@ st.markdown(f"""
     </div>
     <p style='margin-top: 16px; font-size: 12px; color: #9ca3af;'>Desenvolvido para otimização operacional e tomada de decisão baseada em dados</p>
 </div>
-""", unsafe_allow_html=True)df = pd.DataFrame(data_summary)
+""", unsafe_allow_html=True)
+
+df = pd.DataFrame(data_summary)
         st.dataframe(summary_df, use_container_width=True)
         
         # Métricas consolidadas
