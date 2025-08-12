@@ -955,13 +955,22 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 """, unsafe_allow_html=True)
 
-logger.info("Dashboard PCI/SC v2.2 Professional carregado com sucesso")import io
+import io
 import os
 import re
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple, List, Union
 from pathlib import Path
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
+)
+logger = logging.getLogger("PCI/SC")
+
+logger.info("Dashboard PCI/SC v2.2 Professional carregado com sucesso")
+
 
 import pandas as pd
 import numpy as np
