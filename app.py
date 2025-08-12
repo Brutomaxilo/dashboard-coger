@@ -280,44 +280,79 @@ class DataProcessor:
             return 'utf-8'
     
     @staticmethod
-    @st.cache_data(ttl=config.CACHE_TTL, show_spinner=False)
     def smart_csv_reader(file_content: bytes, filename: str) -> Optional[pd.DataFrame]:
-        """Leitor inteligente de CSV com detecção automática"""
-        encoding = DataProcessor.detect_encoding(file_content)
+        """Leitor inteligente de CSV com detecção automática e debug"""
+        
+        # Lista de encodings para tentar
+        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'utf-16']
         separators = [';', ',', '\t', '|']
         
-        for sep in separators:
-            try:
-                bio = io.BytesIO(file_content)
-                df = pd.read_csv(
-                    bio, 
-                    sep=sep, 
-                    encoding=encoding,
-                    engine='python',
-                    skip_blank_lines=True,
-                    low_memory=False
-                )
-                
-                # Validação de qualidade
-                if df.shape[1] > 1 and len(df) > 0:
-                    # Limpeza automática
-                    df.columns = [col.strip().strip('"\'') for col in df.columns]
-                    
-                    # Conversão de tipos inteligente
-                    for col in df.columns:
-                        if df[col].dtype == 'object':
-                            df[col] = df[col].astype(str).str.strip().str.strip('"\'')
-                            
-                            # Tentativa de conversão numérica
-                            if col.lower() in ['id', 'quantidade', 'idatendimento', 'iddocumento']:
-                                df[col] = pd.to_numeric(df[col], errors='coerce')
-                    
-                    return df
-                    
-            except Exception:
-                continue
+        # Debug: Mostrar informações do arquivo
+        st.write(f"🔍 Processando: {filename} ({len(file_content)} bytes)")
         
+        # Tentar diferentes combinações
+        for encoding in encodings:
+            for sep in separators:
+                try:
+                    # Reset do buffer
+                    bio = io.BytesIO(file_content)
+                    
+                    # Primeiro, tentar ler apenas as primeiras linhas para validar
+                    df_sample = pd.read_csv(
+                        bio, 
+                        sep=sep, 
+                        encoding=encoding,
+                        engine='python',
+                        nrows=5,
+                        skip_blank_lines=True
+                    )
+                    
+                    # Se conseguiu ler sample, ler arquivo completo
+                    if df_sample.shape[1] > 1 and len(df_sample) > 0:
+                        bio = io.BytesIO(file_content)  # Reset buffer
+                        df = pd.read_csv(
+                            bio, 
+                            sep=sep, 
+                            encoding=encoding,
+                            engine='python',
+                            skip_blank_lines=True,
+                            low_memory=False
+                        )
+                        
+                        # Limpeza das colunas
+                        df.columns = [str(col).strip().strip('"\'').strip() for col in df.columns]
+                        
+                        # Limpeza dos dados
+                        for col in df.columns:
+                            if df[col].dtype == 'object':
+                                df[col] = df[col].astype(str).str.strip().str.strip('"\'')
+                                
+                                # Conversão numérica para colunas específicas
+                                if any(keyword in col.lower() for keyword in ['id', 'quantidade', 'numero']):
+                                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                        
+                        st.success(f"✅ {filename}: {len(df)} registros, {len(df.columns)} colunas (encoding: {encoding}, sep: '{sep}')")
+                        
+                        # Debug: Mostrar primeiras colunas
+                        st.write(f"📋 Colunas: {list(df.columns[:5])}{'...' if len(df.columns) > 5 else ''}")
+                        
+                        return df
+                        
+                except Exception as e:
+                    # Debug: Mostrar erro específico
+                    continue
+        
+        # Se chegou aqui, não conseguiu processar
         st.error(f"❌ Não foi possível processar {filename}")
+        st.write("💡 Verifique se o arquivo está no formato CSV válido")
+        
+        # Tentar mostrar conteúdo raw para debug
+        try:
+            preview = file_content[:500].decode('utf-8', errors='ignore')
+            st.text(f"Prévia do arquivo:\n{preview}")
+        except:
+            pass
+            
         return None
 
 class MetricsCalculator:
@@ -492,22 +527,51 @@ ENHANCED_COLUMN_MAPPINGS = {
 
 @st.cache_data(ttl=config.CACHE_TTL, show_spinner=False)
 def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
-    """Padronização inteligente de DataFrames"""
+    """Padronização inteligente de DataFrames com debug"""
     if df is None or df.empty:
         return pd.DataFrame()
+    
+    st.write(f"🔧 Padronizando dataset: {name}")
     
     result = df.copy()
     mapping = ENHANCED_COLUMN_MAPPINGS.get(name, {})
     
-    # Normalização de colunas
-    result.columns = [col.lower().strip().replace(' ', '_') for col in result.columns]
+    # Debug: Mostrar colunas originais
+    st.write(f"📋 Colunas originais: {list(result.columns)}")
     
-    # Processamento de quantidade
-    quantity_col = mapping.get("quantity_column")
-    if quantity_col and quantity_col in result.columns:
+    # Normalização de colunas (mais tolerante)
+    original_columns = result.columns.tolist()
+    result.columns = [str(col).lower().strip().replace(' ', '_').replace('-', '_') for col in result.columns]
+    
+    # Mapeamento de colunas comuns (mais flexível)
+    column_aliases = {
+        'data_interesse': ['data', 'data_atendimento', 'dt_interesse', 'data_solicitacao'],
+        'quantidade': ['qtd', 'qtde', 'total', 'count', 'numero'],
+        'idatendimento': ['id_atendimento', 'atendimento_id', 'cod_atendimento'],
+        'iddocumento': ['id_documento', 'documento_id', 'cod_documento', 'id_laudo'],
+        'unidade': ['unidade_origem', 'local', 'origem'],
+        'diretoria': ['dir', 'diret'],
+        'superintendencia': ['super', 'superintend'],
+        'tipo': ['tipopericia', 'tipo_pericia', 'competencia', 'txcompetencia']
+    }
+    
+    # Aplicar aliases
+    for target_col, aliases in column_aliases.items():
+        if target_col not in result.columns:
+            for alias in aliases:
+                if alias in result.columns:
+                    result = result.rename(columns={alias: target_col})
+                    st.write(f"🔄 Renomeado: {alias} → {target_col}")
+                    break
+    
+    # Processamento de quantidade (mais flexível)
+    quantity_col = mapping.get("quantity_column", "quantidade")
+    if quantity_col in result.columns:
         result["quantidade"] = pd.to_numeric(result[quantity_col], errors="coerce").fillna(1)
-    else:
+    elif "quantidade" not in result.columns:
+        # Se não tem coluna quantidade, criar baseada no número de linhas
         result["quantidade"] = 1
+        st.write("ℹ️ Coluna 'quantidade' criada com valor padrão 1")
     
     # Processamento de dimensões
     dimensions = mapping.get("dimensions", {})
@@ -517,10 +581,13 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
                                  .astype(str)
                                  .str.strip()
                                  .str.title()
-                                 .replace({"Nan": None, "": None}))
+                                 .replace({"Nan": None, "": None, "None": None}))
     
-    # Processamento de datas avançado
+    # Processamento de datas (mais robusto)
     date_columns = mapping.get("date_columns", [])
+    date_processed = False
+    
+    # Tentar colunas de data do mapeamento
     for date_col in date_columns:
         if date_col in result.columns:
             processed_date = pd.to_datetime(result[date_col], 
@@ -529,19 +596,49 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
                                           infer_datetime_format=True)
             if processed_date.notna().any():
                 result["data_base"] = processed_date
-                result["anomês_dt"] = processed_date.dt.to_period("M").dt.to_timestamp()
-                result["anomês"] = result["anomês_dt"].dt.strftime("%Y-%m")
-                result["ano"] = result["anomês_dt"].dt.year
-                result["mes"] = result["anomês_dt"].dt.month
-                result["dia"] = processed_date.dt.normalize()
-                result["dia_semana"] = processed_date.dt.day_name()
+                date_processed = True
+                st.write(f"📅 Data processada da coluna: {date_col}")
                 break
+    
+    # Se não encontrou, tentar colunas que parecem data
+    if not date_processed:
+        potential_date_cols = [col for col in result.columns if 'data' in col.lower()]
+        for date_col in potential_date_cols:
+            try:
+                processed_date = pd.to_datetime(result[date_col], 
+                                              errors="coerce", 
+                                              dayfirst=True,
+                                              infer_datetime_format=True)
+                if processed_date.notna().sum() > len(result) * 0.5:  # Se pelo menos 50% são datas válidas
+                    result["data_base"] = processed_date
+                    date_processed = True
+                    st.write(f"📅 Data inferida da coluna: {date_col}")
+                    break
+            except:
+                continue
+    
+    # Criar campos derivados de data se foi processada
+    if date_processed and "data_base" in result.columns:
+        result["anomês_dt"] = result["data_base"].dt.to_period("M").dt.to_timestamp()
+        result["anomês"] = result["anomês_dt"].dt.strftime("%Y-%m")
+        result["ano"] = result["anomês_dt"].dt.year
+        result["mes"] = result["anomês_dt"].dt.month
+        result["dia"] = result["data_base"].dt.normalize()
+        result["dia_semana"] = result["data_base"].dt.day_name()
+        st.write("📊 Campos temporais derivados criados")
+    else:
+        st.warning("⚠️ Nenhuma coluna de data válida encontrada")
     
     # ID único
     id_col = mapping.get("id_column")
     if id_col and id_col in result.columns:
         result["id"] = result[id_col].astype(str)
+    elif not any("id" in col.lower() for col in result.columns):
+        # Criar ID sequencial se não existir
+        result["id"] = range(len(result))
+        st.write("🆔 ID sequencial criado")
     
+    st.write(f"✅ Padronização concluída: {len(result)} registros, {len(result.columns)} colunas")
     return result
 
 # ============ SIDEBAR AVANÇADA ============
@@ -592,82 +689,180 @@ with st.sidebar:
 # ============ PROCESSAMENTO DE DADOS ============
 @st.cache_data(ttl=config.CACHE_TTL, show_spinner="Processando dados...")
 def load_and_process_data(files: List) -> Dict[str, pd.DataFrame]:
-    """Carrega e processa todos os dados"""
+    """Carrega e processa todos os dados com debug melhorado"""
     dataframes = {}
     
     if not files:
-        # Tentar carregar da pasta data/
+        st.info("📁 Nenhum arquivo enviado via upload")
+        # Tentar carregar da pasta data/ se existir
         if os.path.exists("data"):
-            for filename in os.listdir("data"):
-                if filename.endswith('.csv'):
+            st.info("🔍 Verificando pasta data/ local...")
+            csv_files = [f for f in os.listdir("data") if f.endswith('.csv')]
+            if csv_files:
+                st.info(f"📂 Encontrados {len(csv_files)} arquivos CSV na pasta data/")
+                for filename in csv_files:
                     filepath = os.path.join("data", filename)
-                    with open(filepath, 'rb') as f:
-                        content = f.read()
-                    
-                    df = DataProcessor.smart_csv_reader(content, filename)
-                    if df is not None:
-                        # Detectar tipo de dataset pelo nome
-                        base_name = os.path.splitext(filename)[0].lower()
-                        dataset_name = detect_dataset_type(base_name)
-                        dataframes[dataset_name] = standardize_dataframe(dataset_name, df)
+                    try:
+                        with open(filepath, 'rb') as f:
+                            content = f.read()
+                        
+                        df = DataProcessor.smart_csv_reader(content, filename)
+                        if df is not None:
+                            dataset_name = detect_dataset_type(filename)
+                            standardized_df = standardize_dataframe(dataset_name, df)
+                            if not standardized_df.empty:
+                                dataframes[dataset_name] = standardized_df
+                                st.success(f"✅ Carregado: {filename} → {dataset_name}")
+                    except Exception as e:
+                        st.error(f"❌ Erro ao carregar {filename}: {str(e)}")
+            else:
+                st.warning("📂 Pasta data/ existe mas não contém arquivos CSV")
         return dataframes
     
     # Processar uploads
-    for uploaded_file in files:
-        if uploaded_file is not None:
-            content = uploaded_file.read()
-            df = DataProcessor.smart_csv_reader(content, uploaded_file.name)
-            
-            if df is not None:
-                base_name = os.path.splitext(uploaded_file.name)[0].lower()
-                dataset_name = detect_dataset_type(base_name)
-                dataframes[dataset_name] = standardize_dataframe(dataset_name, df)
+    st.info(f"📤 Processando {len(files)} arquivo(s) enviado(s)...")
     
+    for i, uploaded_file in enumerate(files):
+        if uploaded_file is not None:
+            try:
+                st.write(f"📁 Processando arquivo {i+1}/{len(files)}: {uploaded_file.name}")
+                
+                # Ler conteúdo
+                content = uploaded_file.read()
+                
+                # Processar CSV
+                df = DataProcessor.smart_csv_reader(content, uploaded_file.name)
+                
+                if df is not None:
+                    # Detectar tipo e padronizar
+                    dataset_name = detect_dataset_type(uploaded_file.name)
+                    st.write(f"🔍 Detectado como: {dataset_name}")
+                    
+                    standardized_df = standardize_dataframe(dataset_name, df)
+                    
+                    if not standardized_df.empty:
+                        dataframes[dataset_name] = standardized_df
+                        st.success(f"✅ Processado com sucesso: {uploaded_file.name}")
+                    else:
+                        st.warning(f"⚠️ Arquivo processado mas ficou vazio após padronização: {uploaded_file.name}")
+                else:
+                    st.error(f"❌ Falha no processamento: {uploaded_file.name}")
+                    
+            except Exception as e:
+                st.error(f"❌ Erro inesperado ao processar {uploaded_file.name}: {str(e)}")
+                # Mostrar traceback para debug
+                import traceback
+                st.code(traceback.format_exc())
+    
+    st.info(f"📊 Total de datasets válidos carregados: {len(dataframes)}")
     return dataframes
 
 def detect_dataset_type(filename: str) -> str:
-    """Detecta o tipo de dataset pelo nome do arquivo"""
-    filename = filename.lower().replace(' ', '_').replace('-', '_')
+    """Detecta o tipo de dataset pelo nome do arquivo com melhor tolerância"""
+    filename_clean = filename.lower().replace(' ', '_').replace('-', '_').replace('(', '').replace(')', '')
+    
+    # Remover números entre parênteses que podem estar no nome
+    import re
+    filename_clean = re.sub(r'\(\d+\)', '', filename_clean)
     
     patterns = {
-        'atendimentos_todos': 'Atendimentos_todos_Mensal',
-        'laudos_todos': 'Laudos_todos_Mensal',
-        'atendimentos_especifico': 'Atendimentos_especifico_Mensal',
-        'laudos_especifico': 'Laudos_especifico_Mensal',
         'atendimentos_diario': 'Atendimentos_diario',
+        'atendimentos_todos': 'Atendimentos_todos_Mensal', 
+        'atendimentos_especifico': 'Atendimentos_especifico_Mensal',
         'laudos_diario': 'Laudos_diario',
+        'laudos_todos': 'Laudos_todos_Mensal',
+        'laudos_especifico': 'Laudos_especifico_Mensal',
+        'laudos_realizados': 'Laudos_todos_Mensal',  # Alias
         'laudospendentes': 'detalhes_laudospendentes',
-        'examespendentes': 'detalhes_examespendentes'
+        'examespendentes': 'detalhes_examespendentes',
+        'detalhes_laudospendentes': 'detalhes_laudospendentes',
+        'detalhes_examespendentes': 'detalhes_examespendentes'
     }
     
+    # Buscar correspondência mais flexível
     for pattern, dataset_type in patterns.items():
-        if pattern in filename:
+        if pattern in filename_clean:
             return dataset_type
     
-    return filename
+    # Fallback baseado em palavras-chave
+    if 'atendimento' in filename_clean:
+        if 'diario' in filename_clean:
+            return 'Atendimentos_diario'
+        elif 'especifico' in filename_clean:
+            return 'Atendimentos_especifico_Mensal'
+        else:
+            return 'Atendimentos_todos_Mensal'
+    
+    if 'laudo' in filename_clean:
+        if 'diario' in filename_clean:
+            return 'Laudos_diario'
+        elif 'especifico' in filename_clean:
+            return 'Laudos_especifico_Mensal'
+        elif 'pendente' in filename_clean:
+            return 'detalhes_laudospendentes'
+        else:
+            return 'Laudos_todos_Mensal'
+    
+    if 'exame' in filename_clean and 'pendente' in filename_clean:
+        return 'detalhes_examespendentes'
+    
+    # Usar nome original se não encontrou padrão
+    return filename_clean
 
 # Carregar dados
 with st.spinner("🔄 Carregando e processando dados..."):
-    dataframes = load_and_process_data(uploaded_files if 'uploaded_files' in locals() else [])
+    dataframes = load_and_process_data(uploaded_files if uploaded_files else [])
 
-# Validação e feedback
+# Debug: Mostrar informações dos dataframes carregados
+if dataframes:
+    st.sidebar.success(f"✅ {len(dataframes)} datasets processados")
+    with st.sidebar.expander("📊 Detalhes dos Datasets", expanded=False):
+        for name, df in dataframes.items():
+            if df is not None and not df.empty:
+                st.write(f"**{name}:**")
+                st.write(f"- Registros: {len(df):,}")
+                st.write(f"- Colunas: {len(df.columns)}")
+                st.write(f"- Colunas principais: {list(df.columns[:3])}")
+                st.write("---")
+
+# Validação e feedback melhorado
 if not dataframes:
-    st.warning("⚠️ Nenhum arquivo de dados foi carregado")
+    st.warning("⚠️ Nenhum arquivo de dados foi carregado com sucesso")
     st.info("""
     📝 **Para começar:**
-    - Faça upload dos arquivos CSV usando a sidebar
-    - Ou coloque os arquivos na pasta `data/` do projeto
+    1. Faça upload dos arquivos CSV usando a sidebar  
+    2. Verifique se os arquivos estão no formato correto
+    3. Os arquivos devem ter pelo menos 2 colunas e dados válidos
     
-    **Arquivos esperados:** Atendimentos, Laudos, Pendências
+    **Formatos suportados:** CSV com separadores `;`, `,`, `|` ou tab
+    **Encoding:** UTF-8, Latin-1, CP1252, ISO-8859-1
     """)
+    
+    # Mostrar exemplo de estrutura esperada
+    with st.expander("📋 Estrutura esperada dos arquivos"):
+        st.markdown("""
+        **Atendimentos:**
+        - Deve conter: data_interesse, idatendimento, quantidade
+        
+        **Laudos:**  
+        - Deve conter: data_interesse, iddocumento, quantidade
+        
+        **Pendências:**
+        - Deve conter: data_solicitacao, caso_sirsaelp, unidade
+        """)
+    
     st.stop()
 
-# Resumo dos dados carregados
-with st.sidebar:
-    st.success(f"✅ {len(dataframes)} datasets carregados")
-    for name, df in dataframes.items():
-        if not df.empty:
-            st.write(f"📊 {name.replace('_', ' ')}: {len(df):,} registros")
+# Só continua se tiver dados válidos
+valid_dataframes = {k: v for k, v in dataframes.items() if v is not None and not v.empty}
+
+if not valid_dataframes:
+    st.error("❌ Nenhum dataset válido foi carregado")
+    st.info("Verifique se os arquivos contêm dados válidos e estrutura correta")
+    st.stop()
+
+# Atualizar dataframes para usar apenas os válidos
+dataframes = valid_dataframes
 
 # ============ FILTROS INTELIGENTES ============
 class FilterEngine:
