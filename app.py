@@ -261,98 +261,189 @@ class DataProcessor:
     """Classe para processamento avançado de dados"""
     
     @staticmethod
-    @st.cache_data(ttl=config.CACHE_TTL, show_spinner=False)
     def detect_encoding(file_content: bytes) -> str:
-        """Detecta encoding do arquivo automaticamente"""
+        """Detecta encoding do arquivo com tratamento para BOM"""
+        # Verificar BOM (Byte Order Mark)
+        if file_content.startswith(b'\xef\xbb\xbf'):
+            return 'utf-8-sig'
+        elif file_content.startswith(b'\xff\xfe'):
+            return 'utf-16-le'
+        elif file_content.startswith(b'\xfe\xff'):
+            return 'utf-16-be'
+        
         try:
             import chardet
             result = chardet.detect(file_content)
-            return result.get('encoding', 'utf-8')
+            detected_encoding = result.get('encoding', 'utf-8')
+            confidence = result.get('confidence', 0)
+            
+            # Se a confiança é baixa, usar utf-8-sig como fallback
+            if confidence < 0.7:
+                return 'utf-8-sig'
+            
+            return detected_encoding
         except ImportError:
             # Fallback sem chardet
-            encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+            encodings = ['utf-8-sig', 'utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
             for encoding in encodings:
                 try:
                     file_content.decode(encoding)
                     return encoding
                 except UnicodeDecodeError:
                     continue
-            return 'utf-8'
+            return 'utf-8-sig'
     
-    @staticmethod
+    @staticmethod  
     def smart_csv_reader(file_content: bytes, filename: str) -> Optional[pd.DataFrame]:
-        """Leitor inteligente de CSV com detecção automática e debug"""
+        """Leitor otimizado especificamente para os arquivos PCI/SC"""
         
-        # Lista de encodings para tentar
-        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'utf-16']
-        separators = [';', ',', '\t', '|']
-        
-        # Debug: Mostrar informações do arquivo
         st.write(f"🔍 Processando: {filename} ({len(file_content)} bytes)")
         
-        # Tentar diferentes combinações
-        for encoding in encodings:
-            for sep in separators:
-                try:
-                    # Reset do buffer
-                    bio = io.BytesIO(file_content)
-                    
-                    # Primeiro, tentar ler apenas as primeiras linhas para validar
-                    df_sample = pd.read_csv(
-                        bio, 
-                        sep=sep, 
-                        encoding=encoding,
-                        engine='python',
-                        nrows=5,
-                        skip_blank_lines=True
-                    )
-                    
-                    # Se conseguiu ler sample, ler arquivo completo
-                    if df_sample.shape[1] > 1 and len(df_sample) > 0:
-                        bio = io.BytesIO(file_content)  # Reset buffer
-                        df = pd.read_csv(
-                            bio, 
-                            sep=sep, 
-                            encoding=encoding,
-                            engine='python',
-                            skip_blank_lines=True,
-                            low_memory=False
-                        )
-                        
-                        # Limpeza das colunas
-                        df.columns = [str(col).strip().strip('"\'').strip() for col in df.columns]
-                        
-                        # Limpeza dos dados
-                        for col in df.columns:
-                            if df[col].dtype == 'object':
-                                df[col] = df[col].astype(str).str.strip().str.strip('"\'')
-                                
-                                # Conversão numérica para colunas específicas
-                                if any(keyword in col.lower() for keyword in ['id', 'quantidade', 'numero']):
-                                    df[col] = pd.to_numeric(df[col], errors='coerce')
-                        
-                        st.success(f"✅ {filename}: {len(df)} registros, {len(df.columns)} colunas (encoding: {encoding}, sep: '{sep}')")
-                        
-                        # Debug: Mostrar primeiras colunas
-                        st.write(f"📋 Colunas: {list(df.columns[:5])}{'...' if len(df.columns) > 5 else ''}")
-                        
-                        return df
-                        
-                except Exception as e:
-                    # Debug: Mostrar erro específico
-                    continue
-        
-        # Se chegou aqui, não conseguiu processar
-        st.error(f"❌ Não foi possível processar {filename}")
-        st.write("💡 Verifique se o arquivo está no formato CSV válido")
-        
-        # Tentar mostrar conteúdo raw para debug
+        # Configurações específicas para os dados do PCI/SC
         try:
-            preview = file_content[:500].decode('utf-8', errors='ignore')
-            st.text(f"Prévia do arquivo:\n{preview}")
-        except:
-            pass
+            # Primeiro, tentar a configuração mais provável baseada na prévia
+            df = pd.read_csv(
+                io.BytesIO(file_content),
+                sep=';',
+                encoding='utf-8-sig',
+                engine='python',
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True,
+                skip_blank_lines=True,
+                on_bad_lines='skip',
+                low_memory=False
+            )
             
+            # Verificar se o resultado faz sentido
+            if df.shape[1] >= 2 and len(df) > 0:
+                # Limpeza das colunas
+                df.columns = [str(col).strip().strip('"').strip() for col in df.columns]
+                
+                # Remover linhas completamente vazias
+                df = df.dropna(how='all')
+                
+                # Limpeza específica dos dados
+                for col in df.columns:
+                    if df[col].dtype == 'object':
+                        # Limpar strings
+                        df[col] = df[col].astype(str).str.strip().str.strip('"')
+                        
+                        # Tratar valores especiais
+                        df[col] = df[col].replace(['nan', 'NaN', 'None', ''], None)
+                        
+                        # Conversão numérica para IDs e quantidades
+                        if any(keyword in col.lower() for keyword in ['id', 'quantidade', 'numero']):
+                            # Remover .0 desnecessário e converter para numérico
+                            df[col] = df[col].str.replace('.0', '', regex=False)
+                            df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                st.success(f"✅ {filename} processado com sucesso!")
+                st.success(f"   📊 {len(df)} registros, {len(df.columns)} colunas")
+                st.write(f"   📋 Colunas: {', '.join(df.columns)}")
+                
+                # Mostrar amostra dos dados para validação
+                if len(df) > 0:
+                    st.write("📊 Amostra dos primeiros registros:")
+                    sample_df = df.head(3).copy()
+                    
+                    # Limitar o tamanho das strings para exibição
+                    for col in sample_df.columns:
+                        if sample_df[col].dtype == 'object':
+                            sample_df[col] = sample_df[col].astype(str).apply(
+                                lambda x: x[:50] + '...' if len(str(x)) > 50 else x
+                            )
+                    
+                    st.dataframe(sample_df, use_container_width=True)
+                
+                return df
+            
+        except Exception as e:
+            st.warning(f"⚠️ Erro na primeira tentativa: {str(e)}")
+        
+        # Se falhou, tentar outras configurações
+        configurations = [
+            {'sep': ';', 'encoding': 'utf-8'},
+            {'sep': ';', 'encoding': 'latin-1'},
+            {'sep': ',', 'encoding': 'utf-8-sig'},
+            {'sep': ',', 'encoding': 'utf-8'},
+            {'sep': '\t', 'encoding': 'utf-8-sig'},
+        ]
+        
+        for config in configurations:
+            try:
+                st.write(f"🔄 Tentando: separador='{config['sep']}', encoding='{config['encoding']}'")
+                
+                df = pd.read_csv(
+                    io.BytesIO(file_content),
+                    sep=config['sep'],
+                    encoding=config['encoding'],
+                    engine='python',
+                    quotechar='"',
+                    doublequote=True,
+                    skipinitialspace=True,
+                    skip_blank_lines=True,
+                    on_bad_lines='skip',
+                    low_memory=False
+                )
+                
+                if df.shape[1] >= 2 and len(df) > 0:
+                    # Aplicar a mesma limpeza
+                    df.columns = [str(col).strip().strip('"').strip() for col in df.columns]
+                    df = df.dropna(how='all')
+                    
+                    for col in df.columns:
+                        if df[col].dtype == 'object':
+                            df[col] = df[col].astype(str).str.strip().str.strip('"')
+                            df[col] = df[col].replace(['nan', 'NaN', 'None', ''], None)
+                            
+                            if any(keyword in col.lower() for keyword in ['id', 'quantidade', 'numero']):
+                                df[col] = df[col].str.replace('.0', '', regex=False)
+                                df[col] = pd.to_numeric(df[col], errors='coerce')
+                    
+                    st.success(f"✅ Sucesso com separador='{config['sep']}', encoding='{config['encoding']}'")
+                    st.success(f"   📊 {len(df)} registros, {len(df.columns)} colunas")
+                    
+                    return df
+                    
+            except Exception as e:
+                continue
+        
+        # Se ainda não funcionou, fornecer diagnóstico
+        st.error(f"❌ Não foi possível processar {filename}")
+        
+        # Análise detalhada do problema
+        try:
+            # Tentar diferentes encodings para mostrar conteúdo
+            for encoding in ['utf-8-sig', 'utf-8', 'latin-1']:
+                try:
+                    content_str = file_content.decode(encoding)
+                    lines = content_str.split('\n')
+                    
+                    st.write(f"📝 Análise com encoding {encoding}:")
+                    st.write(f"   - Total de linhas: {len(lines)}")
+                    st.write(f"   - Header: {lines[0][:100] if lines else 'Vazio'}")
+                    st.write(f"   - Primeira linha de dados: {lines[1][:100] if len(lines) > 1 else 'Não existe'}")
+                    
+                    # Verificar separadores na primeira linha
+                    if lines:
+                        header = lines[0]
+                        sep_counts = {
+                            ';': header.count(';'),
+                            ',': header.count(','),
+                            '\t': header.count('\t'),
+                            '|': header.count('|')
+                        }
+                        st.write(f"   - Contagem de separadores: {sep_counts}")
+                    
+                    break
+                    
+                except UnicodeDecodeError:
+                    continue
+                    
+        except Exception as e:
+            st.write(f"🔍 Erro na análise detalhada: {str(e)}")
+        
         return None
 
 class MetricsCalculator:
