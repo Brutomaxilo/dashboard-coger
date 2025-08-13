@@ -1229,118 +1229,38 @@ with tab1:
 # ============ ABA 2: TENDÊNCIAS ============
 with tab2:
     st.subheader("📈 Análise de Tendências")
-    
-    # DEBUG ESPECÍFICO PARA LAUDOS
-    st.markdown("### 🔧 DEBUG - Status dos DataFrames")
-    
-    debug_datasets = [
-        ("df_atend_todos", df_atend_todos),
-        ("df_laudos_todos", df_laudos_todos),
-        ("Laudos_todos_Mensal (bruto)", raw_dataframes.get("Laudos_todos_Mensal")),
-        ("Laudos_todos_Mensal (padronizado)", standardized_dfs.get("Laudos_todos_Mensal"))
-    ]
-    
-    for name, df in debug_datasets:
-        if df is not None:
-            st.success(f"✅ **{name}**: {len(df)} registros")
-            if "quantidade" in df.columns:
-                st.write(f"   - Soma quantidade: {df['quantidade'].sum()}")
-                st.write(f"   - Tipo quantidade: {df['quantidade'].dtype}")
-                st.write(f"   - Valores únicos: {df['quantidade'].unique()[:10]}")  # Primeiros 10
-            if "anomês_dt" in df.columns:
-                st.write(f"   - Período: {df['anomês_dt'].min()} a {df['anomês_dt'].max()}")
-            st.write(f"   - Colunas: {list(df.columns)}")
-        else:
-            st.error(f"❌ **{name}**: None ou não encontrado")
-    
-    st.markdown("---")
-    
-    # Análise do arquivo bruto de laudos
-    st.markdown("### 🔍 Análise do Arquivo Laudos_todos_Mensal")
-    if "Laudos_todos_Mensal" in raw_dataframes:
-        df_bruto = raw_dataframes["Laudos_todos_Mensal"]
-        st.write("**Arquivo bruto:**")
-        st.write(f"- Shape: {df_bruto.shape}")
-        st.write(f"- Colunas: {list(df_bruto.columns)}")
-        st.dataframe(df_bruto.head(10))
-        
-        # Verificar se há dados de quantidade
-        if len(df_bruto.columns) > 0:
-            primeira_coluna = df_bruto.columns[0]
-            st.write(f"- Primeira coluna: {primeira_coluna}")
-            st.write(f"- Tipo da primeira coluna: {df_bruto[primeira_coluna].dtype}")
-            st.write(f"- Valores únicos da primeira coluna: {df_bruto[primeira_coluna].unique()}")
-    else:
-        st.error("❌ Arquivo Laudos_todos_Mensal não encontrado em raw_dataframes")
-    
-    st.markdown("---")
 
-def create_enhanced_time_series(df: pd.DataFrame, title: str, line_color: str = "blue") -> None:
-    # DEBUG: Verificar dados de entrada
-    st.write(f"**DEBUG {title}:**")
-    if df is None:
-        st.error(f"DataFrame é None para {title}")
-        return
-    if df.empty:
-        st.error(f"DataFrame está vazio para {title}")
-        return
-    if "anomês_dt" not in df.columns:
-        st.error(f"Coluna 'anomês_dt' não encontrada em {title}. Colunas disponíveis: {list(df.columns)}")
-        return
-    if "quantidade" not in df.columns:
-        st.error(f"Coluna 'quantidade' não encontrada em {title}. Colunas disponíveis: {list(df.columns)}")
-        return
-    
-    # Verificar dados válidos
-    valid_dates = df["anomês_dt"].notna().sum()
-    valid_quantities = df["quantidade"].notna().sum()
-    total_quantity = df["quantidade"].sum()
-    
-    st.write(f"- Registros totais: {len(df)}")
-    st.write(f"- Datas válidas: {valid_dates}")
-    st.write(f"- Quantidades válidas: {valid_quantities}")
-    st.write(f"- Soma total quantidade: {total_quantity}")
-    
-    if valid_dates == 0:
-        st.error(f"Nenhuma data válida encontrada em {title}")
-        return
-    if total_quantity == 0:
-        st.warning(f"Soma das quantidades é zero em {title}")
-        return
-    
-    # Processar dados mensais
-    monthly_data = df.groupby("anomês_dt", as_index=False)["quantidade"].sum().sort_values("anomês_dt")
-    
-    if monthly_data.empty:
-        st.error(f"Nenhum dado mensal após agrupamento em {title}")
-        return
-    
-    st.write(f"- Meses únicos após agrupamento: {len(monthly_data)}")
-    st.write(f"- Período: {monthly_data['anomês_dt'].min()} a {monthly_data['anomês_dt'].max()}")
-    
-    monthly_data["Mês"] = monthly_data["anomês_dt"].dt.strftime("%Y-%m")
+    def create_enhanced_time_series(df: pd.DataFrame, title: str, line_color: str = "blue") -> None:
+        if df is None or df.empty or "anomês_dt" not in df.columns:
+            st.info(f"Dados insuficientes para {title}")
+            return
+        monthly_data = df.groupby("anomês_dt", as_index=False)["quantidade"].sum().sort_values("anomês_dt")
+        if monthly_data.empty:
+            st.info(f"Sem dados temporais para {title}")
+            return
+        monthly_data["Mês"] = monthly_data["anomês_dt"].dt.strftime("%Y-%m")
 
-    fig = make_subplots(rows=2, cols=1, subplot_titles=(title, "Variação Percentual Mensal"),
-                        vertical_spacing=0.15, row_heights=[0.7, 0.3])
+        fig = make_subplots(rows=2, cols=1, subplot_titles=(title, "Variação Percentual Mensal"),
+                            vertical_spacing=0.15, row_heights=[0.7, 0.3])
 
-    fig.add_trace(go.Scatter(x=monthly_data["Mês"], y=monthly_data["quantidade"], mode="lines+markers",
-                             name="Valores", line=dict(color=line_color, width=2)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=monthly_data["Mês"], y=monthly_data["quantidade"], mode="lines+markers",
+                                 name="Valores", line=dict(color=line_color, width=2)), row=1, col=1)
 
-    if len(monthly_data) >= 3:
-        monthly_data["media_movel"] = monthly_data["quantidade"].rolling(window=3, center=True).mean()
-        fig.add_trace(go.Scatter(x=monthly_data["Mês"], y=monthly_data["media_movel"], mode="lines",
-                                 name="Média Móvel (3m)", line=dict(dash="dash", color="red", width=2)), row=1, col=1)
+        if len(monthly_data) >= 3:
+            monthly_data["media_movel"] = monthly_data["quantidade"].rolling(window=3, center=True).mean()
+            fig.add_trace(go.Scatter(x=monthly_data["Mês"], y=monthly_data["media_movel"], mode="lines",
+                                     name="Média Móvel (3m)", line=dict(dash="dash", color="red", width=2)), row=1, col=1)
 
-    monthly_data["variacao_pct"] = monthly_data["quantidade"].pct_change() * 100
-    colors = ['red' if x < 0 else 'green' for x in monthly_data["variacao_pct"].fillna(0)]
-    fig.add_trace(go.Bar(x=monthly_data["Mês"], y=monthly_data["variacao_pct"], name="Variação %",
-                         marker_color=colors, showlegend=False), row=2, col=1)
+        monthly_data["variacao_pct"] = monthly_data["quantidade"].pct_change() * 100
+        colors = ['red' if x < 0 else 'green' for x in monthly_data["variacao_pct"].fillna(0)]
+        fig.add_trace(go.Bar(x=monthly_data["Mês"], y=monthly_data["variacao_pct"], name="Variação %",
+                             marker_color=colors, showlegend=False), row=2, col=1)
 
-    fig.update_layout(height=600, hovermode="x unified", showlegend=True)
-    fig.update_xaxes(title_text="Período", row=2, col=1)
-    fig.update_yaxes(title_text="Quantidade", row=1, col=1)
-    fig.update_yaxes(title_text="Variação (%)", row=2, col=1)
-    st.plotly_chart(fig, use_container_width=True)
+        fig.update_layout(height=600, hovermode="x unified", showlegend=True)
+        fig.update_xaxes(title_text="Período", row=2, col=1)
+        fig.update_yaxes(title_text="Quantidade", row=1, col=1)
+        fig.update_yaxes(title_text="Variação (%)", row=2, col=1)
+        st.plotly_chart(fig, use_container_width=True)
 
     colA, colB = st.columns(2)
     with colA:
