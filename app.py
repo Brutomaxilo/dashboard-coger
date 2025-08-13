@@ -1135,48 +1135,72 @@ def calculate_aging_analysis(df: pd.DataFrame, date_column: str = "data_base") -
     
     result = df.copy()
     
-    # Lista de possíveis colunas de data (em ordem de preferência)
-    possible_date_columns = [
-        "data_base", "data_solicitacao", "dhsolicitacao", "data_interesse", 
-        "data", "dt_solicitacao", "data_sol", "dt_base", "dia"
-    ]
-    
-    # Encontrar a primeira coluna de data disponível
-    chosen_date_col = None
-    dates = None
-    
-    for col in possible_date_columns:
-        if col in result.columns and result[col].notna().sum() > 0:
-            # Tentar processar esta coluna
-            try:
-                # Primeiro, tentar conversão padrão
-                test_dates = pd.to_datetime(result[col], errors="coerce", dayfirst=True)
-                
-                # Se mais de 50% são válidas, usar esta coluna
-                if test_dates.notna().sum() > len(test_dates) * 0.5:
-                    chosen_date_col = col
-                    dates = test_dates
-                    break
+    # FORÇAR uso da data_solicitacao se disponível
+    if 'data_solicitacao' in result.columns:
+        try:
+            # Limpar a coluna primeiro (remover espaços, aspas, etc.)
+            data_col = result['data_solicitacao'].astype(str).str.strip().str.replace('"', '').str.replace("'", "")
+            
+            # Tentar múltiplos formatos de data
+            dates = None
+            formats_to_try = [
+                None,  # Auto-detect
+                "%d/%m/%Y",
+                "%Y-%m-%d", 
+                "%d-%m-%Y",
+                "%Y/%m/%d",
+                "%m/%d/%Y",
+                "%d.%m.%Y",
+                "%Y.%m.%d"
+            ]
+            
+            for fmt in formats_to_try:
+                try:
+                    if fmt is None:
+                        # Auto-detect com dayfirst=True (formato brasileiro)
+                        test_dates = pd.to_datetime(data_col, errors="coerce", dayfirst=True, infer_datetime_format=True)
+                    else:
+                        # Formato específico
+                        test_dates = pd.to_datetime(data_col, format=fmt, errors="coerce")
                     
-                # Se não, tentar formatos específicos
-                for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d"]:
-                    try:
-                        test_dates = pd.to_datetime(result[col], format=fmt, errors="coerce")
-                        if test_dates.notna().sum() > len(test_dates) * 0.5:
-                            chosen_date_col = col
-                            dates = test_dates
-                            break
-                    except:
-                        continue
+                    valid_count = test_dates.notna().sum()
+                    if valid_count > 0:  # Se pelo menos 1 data é válida
+                        dates = test_dates
+                        print(f"DEBUG: Formato funcionou: {fmt or 'auto-detect'}, {valid_count} datas válidas")
+                        break
                         
-                if chosen_date_col:
-                    break
+                except Exception as e:
+                    print(f"DEBUG: Erro no formato {fmt}: {e}")
+                    continue
+            
+            if dates is None or dates.notna().sum() == 0:
+                # Último recurso: tentar interpretar manualmente alguns formatos comuns
+                try:
+                    # Verificar se são números (timestamp)
+                    numeric_data = pd.to_numeric(data_col, errors='coerce')
+                    if numeric_data.notna().sum() > 0:
+                        # Tentar como timestamp
+                        dates = pd.to_datetime(numeric_data, unit='s', errors='coerce')
+                        if dates.notna().sum() == 0:
+                            dates = pd.to_datetime(numeric_data, unit='ms', errors='coerce')
+                except:
+                    pass
                     
-            except:
-                continue
+        except Exception as e:
+            print(f"DEBUG: Erro geral na conversão: {e}")
+            dates = None
+    else:
+        dates = None
     
-    # Se não encontrou nenhuma coluna válida, retornar vazio
-    if chosen_date_col is None or dates is None or dates.notna().sum() == 0:
+    # Se ainda não conseguiu converter, retornar erro informativo
+    if dates is None or dates.notna().sum() == 0:
+        # Mostrar amostras dos dados para debug
+        if 'data_solicitacao' in result.columns:
+            sample_data = result['data_solicitacao'].head(10).tolist()
+            error_msg = f"Não foi possível converter as datas. Amostras: {sample_data}"
+        else:
+            error_msg = "Coluna data_solicitacao não encontrada"
+            
         return result, pd.Series(dtype="int64"), {
             "total": len(result),
             "total_com_data_valida": 0,
@@ -1185,15 +1209,15 @@ def calculate_aging_analysis(df: pd.DataFrame, date_column: str = "data_base") -
             "max_dias": 0,
             "criticos": 0,
             "urgentes": 0,
-            "erro": f"Nenhuma coluna de data válida encontrada. Colunas disponíveis: {list(result.columns)}"
+            "erro": error_msg
         }
     
     # Calcular dias pendentes
     hoje = pd.Timestamp.now().normalize()
     dias_pendentes = (hoje - dates).dt.days
     
-    # Filtrar valores válidos (0 a 10000 dias)
-    mask_valido = (dias_pendentes >= 0) & (dias_pendentes <= 10000) & dias_pendentes.notna()
+    # Filtrar valores válidos (0 a 15000 dias - mais permissivo)
+    mask_valido = (dias_pendentes >= 0) & (dias_pendentes <= 15000) & dias_pendentes.notna()
     dias_pendentes_validos = dias_pendentes.where(mask_valido)
     
     # Criar faixas de aging
@@ -1216,6 +1240,7 @@ def calculate_aging_analysis(df: pd.DataFrame, date_column: str = "data_base") -
     result["dias_pendentes"] = dias_pendentes_validos
     result["faixa_aging"] = faixas_aging
     result["prioridade"] = prioridade
+    result["data_convertida"] = dates  # Para debug
     
     # Distribuição por faixa (apenas valores válidos)
     distribuicao = faixas_aging.value_counts().sort_index()
@@ -1230,7 +1255,7 @@ def calculate_aging_analysis(df: pd.DataFrame, date_column: str = "data_base") -
         "max_dias": int(dias_validos.max()) if len(dias_validos) > 0 else 0,
         "criticos": int((prioridade == "Crítico").sum()),
         "urgentes": int((prioridade == "Urgente").sum()),
-        "coluna_usada": chosen_date_col
+        "datas_originais_validas": dates.notna().sum() if dates is not None else 0
     }
     
     return result, distribuicao, stats
