@@ -817,11 +817,39 @@ if dados_dir:
         st.markdown("#### 🥧 Distribuição por Diretoria")
         
         # Sub-abas para diferentes métricas
-        dir_tab1, dir_tab2, dir_tab3, dir_tab4 = st.tabs(["📊 Atendimentos", "📄 Laudos", "⏰ Pend. Laudos", "🔬 Pend. Exames"])
+        dir_tab1, dir_tab2, dir_tab3 = st.tabs(["📊 Produção", "⏰ Pend. Laudos", "🔬 Pend. Exames"])
         
-        # Atendimentos
+        # Produção (Atendimentos e Laudos juntos)
         with dir_tab1:
-            if "atendimentos" in dados_dir:
+            if "atendimentos" in dados_dir and "laudos" in dados_dir:
+                # Layout com duas colunas para mostrar ambos
+                prod_col1, prod_col2 = st.columns(2)
+                
+                with prod_col1:
+                    fig_pie_atend = px.pie(
+                        dados_dir["atendimentos"], 
+                        values="Atendimentos", 
+                        names="Diretoria",
+                        title="Distribuição de Atendimentos",
+                        color_discrete_sequence=px.colors.qualitative.Set3
+                    )
+                    fig_pie_atend.update_traces(textposition='inside', textinfo='percent+label')
+                    fig_pie_atend.update_layout(height=350)
+                    st.plotly_chart(fig_pie_atend, use_container_width=True)
+                
+                with prod_col2:
+                    fig_pie_laudos = px.pie(
+                        dados_dir["laudos"], 
+                        values="Laudos", 
+                        names="Diretoria",
+                        title="Distribuição de Laudos",
+                        color_discrete_sequence=px.colors.qualitative.Pastel
+                    )
+                    fig_pie_laudos.update_traces(textposition='inside', textinfo='percent+label')
+                    fig_pie_laudos.update_layout(height=350)
+                    st.plotly_chart(fig_pie_laudos, use_container_width=True)
+                    
+            elif "atendimentos" in dados_dir:
                 fig_pie_atend = px.pie(
                     dados_dir["atendimentos"], 
                     values="Atendimentos", 
@@ -832,12 +860,8 @@ if dados_dir:
                 fig_pie_atend.update_traces(textposition='inside', textinfo='percent+label')
                 fig_pie_atend.update_layout(height=400)
                 st.plotly_chart(fig_pie_atend, use_container_width=True)
-            else:
-                st.info("Dados de atendimentos não disponíveis")
-        
-        # Laudos
-        with dir_tab2:
-            if "laudos" in dados_dir:
+                
+            elif "laudos" in dados_dir:
                 fig_pie_laudos = px.pie(
                     dados_dir["laudos"], 
                     values="Laudos", 
@@ -849,10 +873,15 @@ if dados_dir:
                 fig_pie_laudos.update_layout(height=400)
                 st.plotly_chart(fig_pie_laudos, use_container_width=True)
             else:
-                st.info("Dados de laudos não disponíveis")
+                st.info("Dados de produção (atendimentos/laudos) não disponíveis")
+
+        # APAGUE as seções antigas de Atendimentos e Laudos separados:
+        # with dir_tab1: ... (seção Atendimentos)
+        # with dir_tab2: ... (seção Laudos)
         
-        # Laudos Pendentes
-        with dir_tab3:
+        # E mantenha apenas as pendências:
+        # Laudos Pendentes (agora dir_tab2)
+        with dir_tab2:
             if "laudos_pendentes" in dados_dir:
                 fig_pie_pend_l = px.pie(
                     dados_dir["laudos_pendentes"], 
@@ -867,8 +896,8 @@ if dados_dir:
             else:
                 st.info("Dados de laudos pendentes não disponíveis")
         
-        # Exames Pendentes
-        with dir_tab4:
+        # Exames Pendentes (agora dir_tab3)
+        with dir_tab3:
             if "exames_pendentes" in dados_dir:
                 fig_pie_pend_e = px.pie(
                     dados_dir["exames_pendentes"], 
