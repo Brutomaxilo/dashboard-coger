@@ -772,6 +772,269 @@ else:
     st.success("✅ **Indicadores saudáveis**: Todos os KPIs estão dentro dos parâmetros esperados")
 st.markdown("---")
 
+# ============ ANÁLISE DAS DIRETORIAS ============
+st.markdown("<h4 class='section-title'>🏛️ Análise Detalhada das Diretorias</h4>", unsafe_allow_html=True)
+
+# Função para análise de diretorias
+def analise_diretorias():
+    # Coletar dados de todas as fontes
+    dados_diretorias = {}
+    
+    # Atendimentos
+    if df_atend_todos is not None and "diretoria" in df_atend_todos.columns:
+        atend_dir = df_atend_todos.groupby("diretoria")["quantidade"].sum().reset_index()
+        atend_dir.columns = ["Diretoria", "Atendimentos"]
+        dados_diretorias["atendimentos"] = atend_dir
+    
+    # Laudos
+    if df_laudos_todos is not None and "diretoria" in df_laudos_todos.columns:
+        laudos_dir = df_laudos_todos.groupby("diretoria")["quantidade"].sum().reset_index()
+        laudos_dir.columns = ["Diretoria", "Laudos"]
+        dados_diretorias["laudos"] = laudos_dir
+    
+    # Laudos Pendentes
+    if df_pend_laudos is not None and "diretoria" in df_pend_laudos.columns:
+        pend_laudos_dir = df_pend_laudos.groupby("diretoria").size().reset_index()
+        pend_laudos_dir.columns = ["Diretoria", "Laudos_Pendentes"]
+        dados_diretorias["laudos_pendentes"] = pend_laudos_dir
+    
+    # Exames Pendentes
+    if df_pend_exames is not None and "diretoria" in df_pend_exames.columns:
+        pend_exames_dir = df_pend_exames.groupby("diretoria").size().reset_index()
+        pend_exames_dir.columns = ["Diretoria", "Exames_Pendentes"]
+        dados_diretorias["exames_pendentes"] = pend_exames_dir
+    
+    return dados_diretorias
+
+# Executar análise
+dados_dir = analise_diretorias()
+
+if dados_dir:
+    # Layout principal
+    dir_col1, dir_col2 = st.columns([0.6, 0.4])
+    
+    with dir_col1:
+        st.markdown("#### 🥧 Distribuição por Diretoria")
+        
+        # Sub-abas para diferentes métricas
+        dir_tab1, dir_tab2, dir_tab3, dir_tab4 = st.tabs(["📊 Atendimentos", "📄 Laudos", "⏰ Pend. Laudos", "🔬 Pend. Exames"])
+        
+        # Atendimentos
+        with dir_tab1:
+            if "atendimentos" in dados_dir:
+                fig_pie_atend = px.pie(
+                    dados_dir["atendimentos"], 
+                    values="Atendimentos", 
+                    names="Diretoria",
+                    title="Distribuição de Atendimentos por Diretoria",
+                    color_discrete_sequence=px.colors.qualitative.Set3
+                )
+                fig_pie_atend.update_traces(textposition='inside', textinfo='percent+label')
+                fig_pie_atend.update_layout(height=400)
+                st.plotly_chart(fig_pie_atend, use_container_width=True)
+            else:
+                st.info("Dados de atendimentos não disponíveis")
+        
+        # Laudos
+        with dir_tab2:
+            if "laudos" in dados_dir:
+                fig_pie_laudos = px.pie(
+                    dados_dir["laudos"], 
+                    values="Laudos", 
+                    names="Diretoria",
+                    title="Distribuição de Laudos por Diretoria",
+                    color_discrete_sequence=px.colors.qualitative.Pastel
+                )
+                fig_pie_laudos.update_traces(textposition='inside', textinfo='percent+label')
+                fig_pie_laudos.update_layout(height=400)
+                st.plotly_chart(fig_pie_laudos, use_container_width=True)
+            else:
+                st.info("Dados de laudos não disponíveis")
+        
+        # Laudos Pendentes
+        with dir_tab3:
+            if "laudos_pendentes" in dados_dir:
+                fig_pie_pend_l = px.pie(
+                    dados_dir["laudos_pendentes"], 
+                    values="Laudos_Pendentes", 
+                    names="Diretoria",
+                    title="Distribuição de Laudos Pendentes por Diretoria",
+                    color_discrete_sequence=px.colors.qualitative.Set1
+                )
+                fig_pie_pend_l.update_traces(textposition='inside', textinfo='percent+label')
+                fig_pie_pend_l.update_layout(height=400)
+                st.plotly_chart(fig_pie_pend_l, use_container_width=True)
+            else:
+                st.info("Dados de laudos pendentes não disponíveis")
+        
+        # Exames Pendentes
+        with dir_tab4:
+            if "exames_pendentes" in dados_dir:
+                fig_pie_pend_e = px.pie(
+                    dados_dir["exames_pendentes"], 
+                    values="Exames_Pendentes", 
+                    names="Diretoria",
+                    title="Distribuição de Exames Pendentes por Diretoria",
+                    color_discrete_sequence=px.colors.qualitative.Dark2
+                )
+                fig_pie_pend_e.update_traces(textposition='inside', textinfo='percent+label')
+                fig_pie_pend_e.update_layout(height=400)
+                st.plotly_chart(fig_pie_pend_e, use_container_width=True)
+            else:
+                st.info("Dados de exames pendentes não disponíveis")
+    
+    with dir_col2:
+        st.markdown("#### 📊 Consolidado por Diretoria")
+        
+        # Consolidar todos os dados
+        consolidado = None
+        for nome, df in dados_dir.items():
+            if consolidado is None:
+                consolidado = df.copy()
+            else:
+                consolidado = pd.merge(consolidado, df, on="Diretoria", how="outer")
+        
+        if consolidado is not None:
+            consolidado = consolidado.fillna(0)
+            
+            # Calcular métricas adicionais
+            if "Atendimentos" in consolidado.columns and "Laudos" in consolidado.columns:
+                consolidado["Taxa_Conversao_%"] = np.where(
+                    consolidado["Atendimentos"] > 0, 
+                    (consolidado["Laudos"] / consolidado["Atendimentos"]) * 100, 
+                    0
+                )
+            
+            if "Laudos_Pendentes" in consolidado.columns and "Exames_Pendentes" in consolidado.columns:
+                consolidado["Total_Pendencias"] = consolidado["Laudos_Pendentes"] + consolidado["Exames_Pendentes"]
+            
+            # Exibir tabela
+            st.dataframe(consolidado, use_container_width=True, height=350)
+            
+            # KPIs por diretoria
+            st.markdown("**🏆 Destaques:**")
+            
+            if "Laudos" in consolidado.columns:
+                dir_mais_produtiva = consolidado.loc[consolidado["Laudos"].idxmax(), "Diretoria"]
+                st.success(f"📈 **Mais Produtiva:** {dir_mais_produtiva}")
+            
+            if "Taxa_Conversao_%" in consolidado.columns:
+                dir_melhor_conversao = consolidado.loc[consolidado["Taxa_Conversao_%"].idxmax(), "Diretoria"]
+                st.info(f"🎯 **Melhor Conversão:** {dir_melhor_conversao}")
+            
+            if "Total_Pendencias" in consolidado.columns:
+                dir_mais_pendencias = consolidado.loc[consolidado["Total_Pendencias"].idxmax(), "Diretoria"]
+                st.warning(f"⏰ **Mais Pendências:** {dir_mais_pendencias}")
+    
+    # Gráfico comparativo detalhado
+    st.markdown("#### 📈 Comparativo Detalhado das Diretorias")
+    
+    if consolidado is not None and len(consolidado) > 1:
+        # Criar gráfico de barras agrupadas
+        fig_comp = go.Figure()
+        
+        if "Atendimentos" in consolidado.columns:
+            fig_comp.add_trace(go.Bar(
+                name='Atendimentos',
+                x=consolidado["Diretoria"],
+                y=consolidado["Atendimentos"],
+                marker_color='lightblue'
+            ))
+        
+        if "Laudos" in consolidado.columns:
+            fig_comp.add_trace(go.Bar(
+                name='Laudos',
+                x=consolidado["Diretoria"],
+                y=consolidado["Laudos"],
+                marker_color='lightgreen'
+            ))
+        
+        if "Laudos_Pendentes" in consolidado.columns:
+            fig_comp.add_trace(go.Bar(
+                name='Laudos Pendentes',
+                x=consolidado["Diretoria"],
+                y=consolidado["Laudos_Pendentes"],
+                marker_color='lightcoral'
+            ))
+        
+        if "Exames_Pendentes" in consolidado.columns:
+            fig_comp.add_trace(go.Bar(
+                name='Exames Pendentes',
+                x=consolidado["Diretoria"],
+                y=consolidado["Exames_Pendentes"],
+                marker_color='lightsalmon'
+            ))
+        
+        fig_comp.update_layout(
+            title="Comparativo Geral das Diretorias",
+            barmode='group',
+            height=450,
+            xaxis_title="Diretoria",
+            yaxis_title="Quantidade",
+            hovermode='x unified'
+        )
+        
+        st.plotly_chart(fig_comp, use_container_width=True)
+        
+        # Taxa de conversão por diretoria
+        if "Taxa_Conversao_%" in consolidado.columns:
+            fig_conversao = px.bar(
+                consolidado.sort_values("Taxa_Conversao_%", ascending=True),
+                x="Taxa_Conversao_%",
+                y="Diretoria",
+                orientation='h',
+                title="Taxa de Conversão por Diretoria (%)",
+                color="Taxa_Conversao_%",
+                color_continuous_scale="RdYlGn",
+                text="Taxa_Conversao_%"
+            )
+            fig_conversao.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+            fig_conversao.update_layout(height=300, showlegend=False)
+            st.plotly_chart(fig_conversao, use_container_width=True)
+
+else:
+    st.info("Dados insuficientes para análise das diretorias. Certifique-se de que os arquivos contêm a coluna 'diretoria'.")
+
+# Evolução temporal por diretoria
+if df_laudos_todos is not None and "diretoria" in df_laudos_todos.columns and "anomês_dt" in df_laudos_todos.columns:
+    st.markdown("#### 📅 Evolução Temporal por Diretoria")
+    
+    # Dados mensais por diretoria
+    temporal_dir = (df_laudos_todos.groupby(["anomês_dt", "diretoria"])["quantidade"]
+                    .sum().reset_index())
+    temporal_dir["Mês"] = temporal_dir["anomês_dt"].dt.strftime("%Y-%m")
+    
+    if not temporal_dir.empty:
+        fig_temporal_dir = px.line(
+            temporal_dir,
+            x="Mês",
+            y="quantidade",
+            color="diretoria",
+            markers=True,
+            title="Evolução Mensal de Laudos por Diretoria",
+            line_shape="spline"
+        )
+        fig_temporal_dir.update_layout(
+            height=400,
+            hovermode="x unified",
+            xaxis_title="Período",
+            yaxis_title="Laudos Emitidos"
+        )
+        st.plotly_chart(fig_temporal_dir, use_container_width=True)
+        
+        # Heatmap por diretoria
+        pivot_dir = temporal_dir.pivot(index="diretoria", columns="Mês", values="quantidade").fillna(0)
+        if not pivot_dir.empty:
+            fig_heat_dir = px.imshow(
+                pivot_dir,
+                aspect="auto",
+                title="Heatmap: Produção por Diretoria × Período",
+                color_continuous_scale="Blues"
+            )
+            fig_heat_dir.update_layout(height=300)
+            st.plotly_chart(fig_heat_dir, use_container_width=True)
+
+st.markdown("---")
 # ============ ABAS ============
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 Visão Geral",
