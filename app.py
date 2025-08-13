@@ -603,12 +603,7 @@ with fc3:
     show_bench = st.toggle("Metas", value=True, help="Exibir linhas de meta/benchmark nos gráficos")
     
 filtered_dfs = {name: apply_filters(df) for name, df in standardized_dfs.items()}
-# DEBUG
-st.sidebar.write("=== DEBUG ===")
-st.sidebar.write(f"Laudos pendentes (bruto): {len(standardized_dfs.get('detalhes_laudospendentes', []))}")
-st.sidebar.write(f"Laudos pendentes (filtrado): {len(df_pend_laudos) if df_pend_laudos is not None else 0}")
-if df_pend_laudos is not None and len(df_pend_laudos) > 0:
-    st.sidebar.write("Colunas:", list(df_pend_laudos.columns))
+
 
 # Atalhos
 df_atend_todos = filtered_dfs.get("Atendimentos_todos_Mensal")
