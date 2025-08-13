@@ -1210,53 +1210,47 @@ def calculate_aging_analysis(df: pd.DataFrame, date_column: str = "data_base") -
     # FORÇAR uso da data_solicitacao se disponível
     if 'data_solicitacao' in result.columns:
         try:
-            # Limpar a coluna primeiro (remover espaços, aspas, etc.)
-            data_col = result['data_solicitacao'].astype(str).str.strip().str.replace('"', '').str.replace("'", "")
+            # Limpar a coluna primeiro
+            data_col = result['data_solicitacao'].astype(str).str.strip()
             
-            # Tentar múltiplos formatos de data
-            dates = None
-            formats_to_try = [
-                None,  # Auto-detect
-                "%d/%m/%Y",
-                "%Y-%m-%d", 
-                "%d-%m-%Y",
-                "%Y/%m/%d",
-                "%m/%d/%Y",
-                "%d.%m.%Y",
-                "%Y.%m.%d"
-            ]
+            # O formato é YYYY-MM-DD HH:MM:SS - usar conversão direta
+            dates = pd.to_datetime(data_col, errors="coerce")
             
-            for fmt in formats_to_try:
-                try:
-                    if fmt is None:
-                        # Auto-detect com dayfirst=True (formato brasileiro)
-                        test_dates = pd.to_datetime(data_col, errors="coerce", dayfirst=True, infer_datetime_format=True)
-                    else:
-                        # Formato específico
+            # Se a conversão direta não funcionou, tentar formatos específicos
+            if dates.isna().sum() > len(dates) * 0.5:
+                print(f"DEBUG: Conversão direta falhou, tentando formatos específicos...")
+                
+                formats_to_try = [
+                    "%Y-%m-%d %H:%M:%S",  # 2018-07-03 12:42:00
+                    "%Y-%m-%d",           # 2018-07-03
+                    "%d/%m/%Y %H:%M:%S",  # 03/07/2018 12:42:00
+                    "%d/%m/%Y",           # 03/07/2018
+                    "%Y/%m/%d %H:%M:%S",  # 2018/07/03 12:42:00
+                    "%Y/%m/%d"            # 2018/07/03
+                ]
+                
+                best_dates = None
+                best_count = 0
+                
+                for fmt in formats_to_try:
+                    try:
                         test_dates = pd.to_datetime(data_col, format=fmt, errors="coerce")
-                    
-                    valid_count = test_dates.notna().sum()
-                    if valid_count > 0:  # Se pelo menos 1 data é válida
-                        dates = test_dates
-                        print(f"DEBUG: Formato funcionou: {fmt or 'auto-detect'}, {valid_count} datas válidas")
-                        break
+                        valid_count = test_dates.notna().sum()
+                        print(f"DEBUG: Formato {fmt}: {valid_count} datas válidas")
                         
-                except Exception as e:
-                    print(f"DEBUG: Erro no formato {fmt}: {e}")
-                    continue
+                        if valid_count > best_count:
+                            best_dates = test_dates
+                            best_count = valid_count
+                            
+                    except Exception as e:
+                        print(f"DEBUG: Erro no formato {fmt}: {e}")
+                        continue
+                
+                if best_dates is not None and best_count > 0:
+                    dates = best_dates
+                    print(f"DEBUG: Melhor formato encontrado: {best_count} datas convertidas")
             
-            if dates is None or dates.notna().sum() == 0:
-                # Último recurso: tentar interpretar manualmente alguns formatos comuns
-                try:
-                    # Verificar se são números (timestamp)
-                    numeric_data = pd.to_numeric(data_col, errors='coerce')
-                    if numeric_data.notna().sum() > 0:
-                        # Tentar como timestamp
-                        dates = pd.to_datetime(numeric_data, unit='s', errors='coerce')
-                        if dates.notna().sum() == 0:
-                            dates = pd.to_datetime(numeric_data, unit='ms', errors='coerce')
-                except:
-                    pass
+            print(f"DEBUG: Total de datas convertidas: {dates.notna().sum()}/{len(dates)}")
                     
         except Exception as e:
             print(f"DEBUG: Erro geral na conversão: {e}")
@@ -1266,10 +1260,9 @@ def calculate_aging_analysis(df: pd.DataFrame, date_column: str = "data_base") -
     
     # Se ainda não conseguiu converter, retornar erro informativo
     if dates is None or dates.notna().sum() == 0:
-        # Mostrar amostras dos dados para debug
         if 'data_solicitacao' in result.columns:
-            sample_data = result['data_solicitacao'].head(10).tolist()
-            error_msg = f"Não foi possível converter as datas. Amostras: {sample_data}"
+            sample_data = result['data_solicitacao'].head(5).tolist()
+            error_msg = f"Falha na conversão de datas. Amostras: {sample_data}"
         else:
             error_msg = "Coluna data_solicitacao não encontrada"
             
@@ -1327,8 +1320,11 @@ def calculate_aging_analysis(df: pd.DataFrame, date_column: str = "data_base") -
         "max_dias": int(dias_validos.max()) if len(dias_validos) > 0 else 0,
         "criticos": int((prioridade == "Crítico").sum()),
         "urgentes": int((prioridade == "Urgente").sum()),
+        "formato_usado": "YYYY-MM-DD HH:MM:SS",
         "datas_originais_validas": dates.notna().sum() if dates is not None else 0
     }
+    
+    print(f"DEBUG: Estatísticas finais - Total com data válida: {stats['total_com_data_valida']}")
     
     return result, distribuicao, stats
 
