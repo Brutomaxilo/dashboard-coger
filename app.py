@@ -1236,79 +1236,71 @@ def calculate_aging_analysis(df: pd.DataFrame, date_column: str = "data_base") -
     return result, distribuicao, stats
 
     col1, col2 = st.columns(2)
+col1, col2 = st.columns(2)
 with col1:
-        st.markdown("#### 📄 Laudos Pendentes")
-        if df_pend_laudos is not None and not df_pend_laudos.empty:
-            # Forçar processamento correto das datas
-            df_laudos_temp = df_pend_laudos.copy()
+    st.markdown("#### 📄 Laudos Pendentes")
+    if df_pend_laudos is not None and not df_pend_laudos.empty:
+        # Forçar processamento correto das datas
+        df_laudos_temp = df_pend_laudos.copy()
+        
+        # Se data_base não existe ou está vazia, tentar criar
+        if 'data_base' not in df_laudos_temp.columns or df_laudos_temp['data_base'].isna().all():
+            if 'data_solicitacao' in df_laudos_temp.columns:
+                df_laudos_temp['data_base'] = pd.to_datetime(df_laudos_temp['data_solicitacao'], errors='coerce', dayfirst=True)
+        
+        laudos_aged, dist_laudos, stats_laudos = calculate_aging_analysis(df_laudos_temp)
+        
+        # Mostrar métricas
+        col_a, col_b, col_c = st.columns(3)
+        with col_a: 
+            total_laudos = stats_laudos.get("total_com_data_valida", stats_laudos.get("total", 0))
+            st.metric("Total", format_number(total_laudos))
+        with col_b: 
+            criticos_laudos = stats_laudos.get("criticos", 0)
+            st.metric("Críticos", criticos_laudos)
+        with col_c: 
+            media_laudos = stats_laudos.get("media_dias", 0)
+            st.metric("Média (dias)", format_number(media_laudos, 1))
+        
+        # Verificar se há dados válidos para gráficos
+        if stats_laudos.get("total_com_data_valida", 0) > 0 and not dist_laudos.empty:
+            # Gráfico de distribuição
+            fig_aging_laudos = px.bar(
+                x=dist_laudos.index, y=dist_laudos.values, 
+                title="Distribuição por Tempo de Pendência",
+                color=dist_laudos.values, color_continuous_scale="Reds", 
+                text=dist_laudos.values
+            )
+            fig_aging_laudos.update_traces(texttemplate='%{text}', textposition='outside')
+            fig_aging_laudos.update_layout(height=350, showlegend=False, 
+                                         xaxis_title="Faixa de Dias", yaxis_title="Quantidade")
+            st.plotly_chart(fig_aging_laudos, use_container_width=True)
             
-            # Se data_base não existe ou está vazia, tentar criar
-            if 'data_base' not in df_laudos_temp.columns or df_laudos_temp['data_base'].isna().all():
-                if 'data_solicitacao' in df_laudos_temp.columns:
-                    df_laudos_temp['data_base'] = pd.to_datetime(df_laudos_temp['data_solicitacao'], errors='coerce', dayfirst=True)
+            # Gráfico de prioridade
+            if "prioridade" in laudos_aged.columns:
+                prioridade_dist = laudos_aged["prioridade"].value_counts()
+                if not prioridade_dist.empty:
+                    fig_prioridade = px.pie(values=prioridade_dist.values, names=prioridade_dist.index,
+                                          title="Distribuição por Prioridade",
+                                          color_discrete_map={"Normal": "green", "Atenção": "yellow", 
+                                                            "Urgente": "orange", "Crítico": "red"})
+                    fig_prioridade.update_layout(height=300)
+                    st.plotly_chart(fig_prioridade, use_container_width=True)
             
-            laudos_aged, dist_laudos, stats_laudos = calculate_aging_analysis(df_laudos_temp)
-            
-            # Mostrar métricas
-            col_a, col_b, col_c = st.columns(3)
-            with col_a: 
-                total_laudos = stats_laudos.get("total_com_data_valida", stats_laudos.get("total", 0))
-                st.metric("Total", format_number(total_laudos))
-            with col_b: 
-                criticos_laudos = stats_laudos.get("criticos", 0)
-                st.metric("Críticos", criticos_laudos)
-            with col_c: 
-                media_laudos = stats_laudos.get("media_dias", 0)
-                st.metric("Média (dias)", format_number(media_laudos, 1))
-            
-            # Verificar se há dados válidos para gráficos
-            if stats_laudos.get("total_com_data_valida", 0) > 0 and not dist_laudos.empty:
-                # Gráfico de distribuição
-                fig_aging_laudos = px.bar(
-                    x=dist_laudos.index, y=dist_laudos.values, 
-                    title="Distribuição por Tempo de Pendência",
-                    color=dist_laudos.values, color_continuous_scale="Reds", 
-                    text=dist_laudos.values
-                )
-                fig_aging_laudos.update_traces(texttemplate='%{text}', textposition='outside')
-                fig_aging_laudos.update_layout(height=350, showlegend=False, 
-                                             xaxis_title="Faixa de Dias", yaxis_title="Quantidade")
-                st.plotly_chart(fig_aging_laudos, use_container_width=True)
+            # Top 10 mais antigas
+            st.markdown("**🔴 Top 10 Mais Antigas:**")
+            if "dias_pendentes" in laudos_aged.columns:
+                # Selecionar colunas para exibição
+                display_cols = []
+                for col in ["id", "caso_sirsaelp", "unidade", "tipo", "tipopericia", "dias_pendentes", "prioridade"]:
+                    if col in laudos_aged.columns:
+                        display_cols.append(col)
                 
-                # Gráfico de prioridade
-                if "prioridade" in laudos_aged.columns:
-                    prioridade_dist = laudos_aged["prioridade"].value_counts()
-                    if not prioridade_dist.empty:
-                        fig_prioridade = px.pie(values=prioridade_dist.values, names=prioridade_dist.index,
-                                              title="Distribuição por Prioridade",
-                                              color_discrete_map={"Normal": "green", "Atenção": "yellow", 
-                                                                "Urgente": "orange", "Crítico": "red"})
-                        fig_prioridade.update_layout(height=300)
-                        st.plotly_chart(fig_prioridade, use_container_width=True)
-                
-                # Top 10 mais antigas
-                st.markdown("**🔴 Top 10 Mais Antigas:**")
-                if "dias_pendentes" in laudos_aged.columns:
-                    # Selecionar colunas para exibição
-                    display_cols = []
-                    for col in ["id", "caso_sirsaelp", "unidade", "tipo", "tipopericia", "dias_pendentes", "prioridade"]:
-                        if col in laudos_aged.columns:
-                            display_cols.append(col)
-                    
-                    if display_cols and laudos_aged["dias_pendentes"].notna().sum() > 0:
-                        oldest = laudos_aged.nlargest(10, "dias_pendentes")[display_cols]
-                        st.dataframe(oldest, use_container_width=True, height=250)
-                    else:
-                        st.info("Não há dados de aging válidos para exibir.")
-            else:
-                st.warning(f"⚠️ Problema no processamento das datas dos laudos pendentes.")
-                if "erro" in stats_laudos:
-                    st.error(stats_laudos["erro"])
-                st.info(f"Registros carregados: {stats_laudos.get('total', 0)}")
-                st.info(f"Registros com data válida: {stats_laudos.get('total_com_data_valida', 0)}")
-                
-        else:
-            st.info("Sem dados de laudos pendentes disponíveis.")
+                if display_cols and laudos_aged["dias_pendentes"].notna().sum() > 0:
+                    oldest = laudos_aged.nlargest(10, "dias_pendentes")[display_cols]
+                    st.dataframe(oldest, use_container_width=True, height=250)
+                else:
+                    st.info("Não há dados de aging válidos para exibir.")
         else:
             st.warning(f"⚠️ Problema no processamento das datas dos laudos pendentes.")
             if "erro" in stats_laudos:
