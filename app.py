@@ -689,6 +689,14 @@ total_laudos = calculate_total(df_laudos_todos)
 total_pend_laudos = len(df_pend_laudos) if df_pend_laudos is not None and not df_pend_laudos.empty else 0
 total_pend_exames = len(df_pend_exames) if df_pend_exames is not None and not df_pend_exames.empty else 0
 
+# Debug para verificar
+print(f"DEBUG Visão Geral - Laudos pendentes: {total_pend_laudos}")
+print(f"DEBUG Visão Geral - Exames pendentes: {total_pend_exames}")
+if df_pend_laudos is not None:
+    print(f"DEBUG Visão Geral - df_pend_laudos shape: {df_pend_laudos.shape}")
+if df_pend_exames is not None:
+    print(f"DEBUG Visão Geral - df_pend_exames shape: {df_pend_exames.shape}")
+
 media_mensal_laudos = calculate_monthly_average(df_laudos_todos)
 backlog_meses = (total_pend_laudos / media_mensal_laudos) if media_mensal_laudos and media_mensal_laudos > 0 else None
 
