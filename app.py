@@ -1065,12 +1065,21 @@ with tab3:
         if df is None or df.empty or dimension not in df.columns:
             st.info(f"Dados insuficientes para {title}")
             return
-        ranking_data = (df.groupby(dimension).agg({"quantidade": ["sum", "count", "mean"]}).round(2))
+        
+        # Verificar se tem dados válidos na dimensão
+        valid_data = df[df[dimension].notna() & (df[dimension] != '') & (df[dimension] != 'nan')]
+        if valid_data.empty:
+            st.info(f"Sem dados válidos para {title}")
+            return
+            
+        ranking_data = (valid_data.groupby(dimension).agg({"quantidade": ["sum", "count", "mean"]}).round(2))
         ranking_data.columns = ["Total", "Registros", "Média"]
         ranking_data = ranking_data.sort_values("Total", ascending=False).head(top_n).reset_index()
-        if ranking_data.empty:
-            st.info(f"Sem dados para {title}")
+        
+        if ranking_data.empty or ranking_data["Total"].sum() == 0:
+            st.info(f"Sem dados numéricos para {title}")
             return
+            
         fig = px.bar(
             ranking_data, x="Total", y=dimension, orientation="h", title=title,
             color="Total", color_continuous_scale="Viridis", hover_data=["Registros", "Média"]
@@ -1078,11 +1087,14 @@ with tab3:
         fig.update_layout(height=max(400, len(ranking_data) * 30), showlegend=False,
                           yaxis={"categoryorder": "total ascending"})
         st.plotly_chart(fig, use_container_width=True)
+        
         with st.expander(f"📊 Detalhes - {title}"):
             st.dataframe(ranking_data, use_container_width=True)
 
     rank_tab1, rank_tab2, rank_tab3, rank_tab4 = st.tabs(["Por Diretoria", "Por Unidade", "Por Tipo", "Comparativo"])
+    
     with rank_tab1:
+        st.markdown("#### 🏢 Rankings por Diretoria")
         col1, col2 = st.columns(2)
         with col1:
             create_enhanced_ranking(df_atend_todos, "diretoria", "🏥 Atendimentos por Diretoria")
@@ -1090,6 +1102,7 @@ with tab3:
             create_enhanced_ranking(df_laudos_todos, "diretoria", "📄 Laudos por Diretoria")
 
     with rank_tab2:
+        st.markdown("#### 🏢 Rankings por Unidade")
         col1, col2 = st.columns(2)
         with col1:
             create_enhanced_ranking(df_atend_todos, "unidade", "🏥 Atendimentos por Unidade", 25)
@@ -1097,6 +1110,7 @@ with tab3:
             create_enhanced_ranking(df_laudos_todos, "unidade", "📄 Laudos por Unidade", 25)
 
     with rank_tab3:
+        st.markdown("#### 🔍 Rankings por Tipo de Perícia")
         col1, col2 = st.columns(2)
         with col1:
             create_enhanced_ranking(df_atend_esp, "tipo", "🏥 Atendimentos por Tipo", 20)
@@ -1107,22 +1121,72 @@ with tab3:
         st.markdown("#### 📊 Análise Comparativa de Eficiência")
         if (df_atend_todos is not None and df_laudos_todos is not None and
                 "unidade" in df_atend_todos.columns and "unidade" in df_laudos_todos.columns):
-            atend_por_unidade = df_atend_todos.groupby("unidade")["quantidade"].sum().reset_index().rename(columns={"quantidade": "Atendimentos"})
-            laudos_por_unidade = df_laudos_todos.groupby("unidade")["quantidade"].sum().reset_index().rename(columns={"quantidade": "Laudos"})
-            eficiencia_data = pd.merge(atend_por_unidade, laudos_por_unidade, on="unidade", how="inner")
-            if not eficiencia_data.empty:
-                eficiencia_data["Taxa_Conversao"] = (eficiencia_data["Laudos"] / eficiencia_data["Atendimentos"]) * 100
-                eficiencia_data = eficiencia_data.sort_values("Taxa_Conversao", ascending=False)
-                fig_eficiencia = px.scatter(
-                    eficiencia_data.head(20), x="Atendimentos", y="Laudos", size="Taxa_Conversao",
-                    hover_name="unidade", title="Eficiência por Unidade (Atendimentos vs Laudos)",
-                    color="Taxa_Conversao", color_continuous_scale="RdYlGn"
-                )
-                fig_eficiencia.update_layout(height=500)
-                st.plotly_chart(fig_eficiencia, use_container_width=True)
-                st.markdown("**🥇 Top 10 Unidades Mais Eficientes:**")
-                top_eficientes = eficiencia_data.head(10)[["unidade", "Taxa_Conversao", "Atendimentos", "Laudos"]]
-                st.dataframe(top_eficientes, use_container_width=True)
+            
+            # Filtrar dados válidos
+            atend_validos = df_atend_todos[df_atend_todos["unidade"].notna() & (df_atend_todos["unidade"] != '')]
+            laudos_validos = df_laudos_todos[df_laudos_todos["unidade"].notna() & (df_laudos_todos["unidade"] != '')]
+            
+            if not atend_validos.empty and not laudos_validos.empty:
+                atend_por_unidade = atend_validos.groupby("unidade")["quantidade"].sum().reset_index().rename(columns={"quantidade": "Atendimentos"})
+                laudos_por_unidade = laudos_validos.groupby("unidade")["quantidade"].sum().reset_index().rename(columns={"quantidade": "Laudos"})
+                eficiencia_data = pd.merge(atend_por_unidade, laudos_por_unidade, on="unidade", how="inner")
+                
+                if not eficiencia_data.empty and len(eficiencia_data) > 0:
+                    eficiencia_data["Taxa_Conversao"] = (eficiencia_data["Laudos"] / eficiencia_data["Atendimentos"]) * 100
+                    eficiencia_data = eficiencia_data.sort_values("Taxa_Conversao", ascending=False)
+                    
+                    fig_eficiencia = px.scatter(
+                        eficiencia_data.head(20), x="Atendimentos", y="Laudos", size="Taxa_Conversao",
+                        hover_name="unidade", title="Eficiência por Unidade (Atendimentos vs Laudos)",
+                        color="Taxa_Conversao", color_continuous_scale="RdYlGn"
+                    )
+                    fig_eficiencia.update_layout(height=500)
+                    st.plotly_chart(fig_eficiencia, use_container_width=True)
+                    
+                    st.markdown("**🥇 Top 10 Unidades Mais Eficientes:**")
+                    top_eficientes = eficiencia_data.head(10)[["unidade", "Taxa_Conversao", "Atendimentos", "Laudos"]]
+                    st.dataframe(top_eficientes, use_container_width=True)
+                else:
+                    st.info("Sem dados suficientes para análise comparativa.")
+            else:
+                st.info("Dados de atendimentos ou laudos não disponíveis para comparação.")
+        else:
+            st.info("Datasets necessários não carregados para análise comparativa.")
+
+    # === SEÇÃO ADICIONAL: Rankings de Pendências ===
+    if df_pend_laudos is not None or df_pend_exames is not None:
+        st.markdown("---")
+        st.markdown("#### ⏰ Rankings de Pendências")
+        
+        pend_col1, pend_col2 = st.columns(2)
+        
+        with pend_col1:
+            if df_pend_laudos is not None and not df_pend_laudos.empty:
+                st.markdown("**📄 Laudos Pendentes por Unidade**")
+                pend_laudos_ranking = df_pend_laudos.groupby("unidade").size().reset_index(name="Pendencias")
+                pend_laudos_ranking = pend_laudos_ranking.sort_values("Pendencias", ascending=False).head(15)
+                
+                if not pend_laudos_ranking.empty:
+                    fig_pend_laudos = px.bar(
+                        pend_laudos_ranking, x="Pendencias", y="unidade", orientation="h",
+                        title="Top 15 - Laudos Pendentes", color="Pendencias", color_continuous_scale="Reds"
+                    )
+                    fig_pend_laudos.update_layout(height=400, showlegend=False, yaxis={"categoryorder": "total ascending"})
+                    st.plotly_chart(fig_pend_laudos, use_container_width=True)
+        
+        with pend_col2:
+            if df_pend_exames is not None and not df_pend_exames.empty:
+                st.markdown("**🔬 Exames Pendentes por Unidade**")
+                pend_exames_ranking = df_pend_exames.groupby("unidade").size().reset_index(name="Pendencias")
+                pend_exames_ranking = pend_exames_ranking.sort_values("Pendencias", ascending=False).head(15)
+                
+                if not pend_exames_ranking.empty:
+                    fig_pend_exames = px.bar(
+                        pend_exames_ranking, x="Pendencias", y="unidade", orientation="h",
+                        title="Top 15 - Exames Pendentes", color="Pendencias", color_continuous_scale="Oranges"
+                    )
+                    fig_pend_exames.update_layout(height=400, showlegend=False, yaxis={"categoryorder": "total ascending"})
+                    st.plotly_chart(fig_pend_exames, use_container_width=True)
 
 # ============ ABA 4: PENDÊNCIAS ============
 with tab4:
