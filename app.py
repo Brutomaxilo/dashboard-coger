@@ -616,60 +616,6 @@ df_pend_exames = filtered_dfs.get("detalhes_examespendentes")
 df_atend_diario = filtered_dfs.get("Atendimentos_diario")
 df_laudos_diario = filtered_dfs.get("Laudos_diario")
 
-# === DEBUG PARA DIAGNÓSTICO ===
-st.sidebar.markdown("### 🔧 Diagnóstico de Dados")
-
-# Dados brutos (antes dos filtros)
-raw_pend_laudos = standardized_dfs.get("detalhes_laudospendentes")
-raw_pend_exames = standardized_dfs.get("detalhes_examespendentes")
-
-if raw_pend_laudos is not None:
-    st.sidebar.success(f"✅ Laudos pendentes (bruto): {len(raw_pend_laudos)} registros")
-    if len(raw_pend_laudos) > 0:
-        st.sidebar.write("📅 Colunas de data encontradas:", [col for col in raw_pend_laudos.columns if 'data' in col.lower()])
-        if 'data_base' in raw_pend_laudos.columns:
-            st.sidebar.write("🗓️ data_base existe:", raw_pend_laudos['data_base'].notna().sum(), "não nulos")
-        if 'anomês_dt' in raw_pend_laudos.columns:
-            st.sidebar.write("📆 anomês_dt existe:", raw_pend_laudos['anomês_dt'].notna().sum(), "não nulos")
-else:
-    st.sidebar.error("❌ Laudos pendentes não carregados")
-
-if raw_pend_exames is not None:
-    st.sidebar.success(f"✅ Exames pendentes (bruto): {len(raw_pend_exames)} registros")
-else:
-    st.sidebar.error("❌ Exames pendentes não carregados")
-
-# Dados filtrados
-if df_pend_laudos is not None:
-    st.sidebar.info(f"📊 Laudos pendentes (após filtros): {len(df_pend_laudos)} registros")
-    if len(df_pend_laudos) == 0 and raw_pend_laudos is not None and len(raw_pend_laudos) > 0:
-        st.sidebar.warning("⚠️ Todos os registros foram filtrados! Remova os filtros para teste.")
-else:
-    st.sidebar.warning("⚠️ df_pend_laudos é None")
-
-if df_pend_exames is not None:
-    st.sidebar.info(f"📊 Exames pendentes (após filtros): {len(df_pend_exames)} registros")
-else:
-    st.sidebar.warning("⚠️ df_pend_exames é None")
-
-# Informações dos filtros ativos
-filtros_ativos = []
-if filter_diretoria: filtros_ativos.append(f"Diretoria: {len(filter_diretoria)} selecionadas")
-if filter_superintendencia: filtros_ativos.append(f"Superintendência: {len(filter_superintendencia)} selecionadas")  
-if filter_unidade: filtros_ativos.append(f"Unidade: {len(filter_unidade)} selecionadas")
-if filter_tipo: filtros_ativos.append(f"Tipo: {len(filter_tipo)} selecionados")
-
-if filtros_ativos:
-    st.sidebar.warning("🔍 Filtros ativos:")
-    for filtro in filtros_ativos:
-        st.sidebar.write(f"- {filtro}")
-    st.sidebar.write(f"📅 Período: {filter_periodo}")
-else:
-    st.sidebar.success("🆓 Nenhum filtro ativo")
-
-# === FIM DO DEBUG ===
-
-
 
 # ============ CÁLCULOS DE KPIs ============
 def calculate_total(df: pd.DataFrame) -> int:
