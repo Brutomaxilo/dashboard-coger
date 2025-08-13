@@ -162,10 +162,18 @@ file_configs = {
         "pattern": ["atendimentos_todos", "atendimentos todos"]
     },
     "Laudos_todos_Mensal": {
-        "label": "Laudos Todos (Mensal)",
-        "description": "Dados gerais de laudos por mês - agregados por competência",
-        "pattern": ["laudos_todos", "laudos todos"]
+    "label": "Laudos Todos (Mensal)",
+    "description": "Dados gerais de laudos por mês - agregados por competência",
+    "pattern": [
+        "laudos_todos", 
+        "laudos todos", 
+        "laudos_todos_mensal",
+        "laudos todos mensal",
+        "laudos_todos_mensal_6",
+        "laudos_todos_mensal 6"
+        ]
     },
+    
     "Atendimentos_especifico_Mensal": {
         "label": "Atendimentos Específicos (Mensal)",
         "description": "Atendimentos detalhados por competência e tipo",
