@@ -616,6 +616,31 @@ df_pend_exames = filtered_dfs.get("detalhes_examespendentes")
 df_atend_diario = filtered_dfs.get("Atendimentos_diario")
 df_laudos_diario = filtered_dfs.get("Laudos_diario")
 
+# === DEBUG TEMPORÁRIO ===
+st.sidebar.markdown("### 🔧 Debug Final")
+if df_pend_laudos is not None:
+    st.sidebar.write(f"📊 Laudos pendentes carregados: {len(df_pend_laudos)}")
+    st.sidebar.write(f"📅 Colunas: {list(df_pend_laudos.columns)}")
+    
+    # Verificar coluna data_solicitacao especificamente
+    if 'data_solicitacao' in df_pend_laudos.columns:
+        valores_nao_nulos = df_pend_laudos['data_solicitacao'].notna().sum()
+        st.sidebar.write(f"🗓️ data_solicitacao: {valores_nao_nulos} valores não nulos")
+        if valores_nao_nulos > 0:
+            amostra = df_pend_laudos['data_solicitacao'].dropna().head(3).tolist()
+            st.sidebar.write(f"📝 Amostra: {amostra}")
+    
+    # Testar conversão de data
+    if 'data_solicitacao' in df_pend_laudos.columns:
+        try:
+            datas_convertidas = pd.to_datetime(df_pend_laudos['data_solicitacao'], errors='coerce', dayfirst=True)
+            validas = datas_convertidas.notna().sum()
+            st.sidebar.write(f"✅ Datas convertidas com sucesso: {validas}")
+        except Exception as e:
+            st.sidebar.error(f"❌ Erro na conversão: {str(e)}")
+else:
+    st.sidebar.error("❌ df_pend_laudos é None")
+# === FIM DEBUG ===
 
 # ============ CÁLCULOS DE KPIs ============
 def calculate_total(df: pd.DataFrame) -> int:
@@ -1103,74 +1128,187 @@ with tab3:
 with tab4:
     st.subheader("⏰ Gestão de Pendências")
 
-    def calculate_aging_analysis(df: pd.DataFrame, date_column: str = "data_base") -> Tuple[pd.DataFrame, pd.Series, Dict]:
-        if df is None or df.empty:
-            return pd.DataFrame(), pd.Series(dtype="int64"), {}
-        available_date_columns = [col for col in df.columns if "data" in col.lower()]
-        if date_column not in df.columns and available_date_columns:
-            date_column = available_date_columns[0]
-        if date_column not in df.columns:
-            return df, pd.Series(dtype="int64"), {}
-        result = df.copy()
-        dates = pd.to_datetime(result[date_column], errors="coerce")
-        if dates.isna().all():
-            return df, pd.Series(dtype="int64"), {}
-        hoje = pd.Timestamp.now().normalize()
-        dias_pendentes = (hoje - dates).dt.days
-        faixas_aging = pd.cut(
-            dias_pendentes,
-            bins=[-1, 15, 30, 60, 90, 180, 365, float('inf')],
-            labels=["0-15 dias", "16-30 dias", "31-60 dias", "61-90 dias", "91-180 dias", "181-365 dias", "> 365 dias"]
-        )
-        result["dias_pendentes"] = dias_pendentes
-        result["faixa_aging"] = faixas_aging
-        result["prioridade"] = pd.cut(
-            dias_pendentes,
-            bins=[-1, 30, 90, 180, float('inf')],
-            labels=["Normal", "Atenção", "Urgente", "Crítico"]
-        )
-        distribuicao = faixas_aging.value_counts().sort_index()
-        stats = {
+def calculate_aging_analysis(df: pd.DataFrame, date_column: str = "data_base") -> Tuple[pd.DataFrame, pd.Series, Dict]:
+    """Calcula análise de aging com fallbacks robustos para colunas de data."""
+    if df is None or df.empty:
+        return pd.DataFrame(), pd.Series(dtype="int64"), {}
+    
+    result = df.copy()
+    
+    # Lista de possíveis colunas de data (em ordem de preferência)
+    possible_date_columns = [
+        "data_base", "data_solicitacao", "dhsolicitacao", "data_interesse", 
+        "data", "dt_solicitacao", "data_sol", "dt_base", "dia"
+    ]
+    
+    # Encontrar a primeira coluna de data disponível
+    chosen_date_col = None
+    dates = None
+    
+    for col in possible_date_columns:
+        if col in result.columns and result[col].notna().sum() > 0:
+            # Tentar processar esta coluna
+            try:
+                # Primeiro, tentar conversão padrão
+                test_dates = pd.to_datetime(result[col], errors="coerce", dayfirst=True)
+                
+                # Se mais de 50% são válidas, usar esta coluna
+                if test_dates.notna().sum() > len(test_dates) * 0.5:
+                    chosen_date_col = col
+                    dates = test_dates
+                    break
+                    
+                # Se não, tentar formatos específicos
+                for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d"]:
+                    try:
+                        test_dates = pd.to_datetime(result[col], format=fmt, errors="coerce")
+                        if test_dates.notna().sum() > len(test_dates) * 0.5:
+                            chosen_date_col = col
+                            dates = test_dates
+                            break
+                    except:
+                        continue
+                        
+                if chosen_date_col:
+                    break
+                    
+            except:
+                continue
+    
+    # Se não encontrou nenhuma coluna válida, retornar vazio
+    if chosen_date_col is None or dates is None or dates.notna().sum() == 0:
+        return result, pd.Series(dtype="int64"), {
             "total": len(result),
-            "media_dias": float(dias_pendentes.mean()),
-            "mediana_dias": float(dias_pendentes.median()),
-            "max_dias": int(dias_pendentes.max()),
-            "criticos": int((result["prioridade"] == "Crítico").sum()),
-            "urgentes": int((result["prioridade"] == "Urgente").sum())
+            "total_com_data_valida": 0,
+            "media_dias": 0,
+            "mediana_dias": 0,
+            "max_dias": 0,
+            "criticos": 0,
+            "urgentes": 0,
+            "erro": f"Nenhuma coluna de data válida encontrada. Colunas disponíveis: {list(result.columns)}"
         }
-        return result, distribuicao, stats
+    
+    # Calcular dias pendentes
+    hoje = pd.Timestamp.now().normalize()
+    dias_pendentes = (hoje - dates).dt.days
+    
+    # Filtrar valores válidos (0 a 10000 dias)
+    mask_valido = (dias_pendentes >= 0) & (dias_pendentes <= 10000) & dias_pendentes.notna()
+    dias_pendentes_validos = dias_pendentes.where(mask_valido)
+    
+    # Criar faixas de aging
+    faixas_aging = pd.cut(
+        dias_pendentes_validos,
+        bins=[-1, 15, 30, 60, 90, 180, 365, float('inf')],
+        labels=["0-15 dias", "16-30 dias", "31-60 dias", "61-90 dias", "91-180 dias", "181-365 dias", "> 365 dias"],
+        include_lowest=True
+    )
+    
+    # Criar prioridades
+    prioridade = pd.cut(
+        dias_pendentes_validos,
+        bins=[-1, 30, 90, 180, float('inf')],
+        labels=["Normal", "Atenção", "Urgente", "Crítico"],
+        include_lowest=True
+    )
+    
+    # Adicionar colunas ao resultado
+    result["dias_pendentes"] = dias_pendentes_validos
+    result["faixa_aging"] = faixas_aging
+    result["prioridade"] = prioridade
+    
+    # Distribuição por faixa (apenas valores válidos)
+    distribuicao = faixas_aging.value_counts().sort_index()
+    
+    # Estatísticas
+    dias_validos = dias_pendentes_validos.dropna()
+    stats = {
+        "total": len(result),
+        "total_com_data_valida": len(dias_validos),
+        "media_dias": float(dias_validos.mean()) if len(dias_validos) > 0 else 0,
+        "mediana_dias": float(dias_validos.median()) if len(dias_validos) > 0 else 0,
+        "max_dias": int(dias_validos.max()) if len(dias_validos) > 0 else 0,
+        "criticos": int((prioridade == "Crítico").sum()),
+        "urgentes": int((prioridade == "Urgente").sum()),
+        "coluna_usada": chosen_date_col
+    }
+    
+    return result, distribuicao, stats
 
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("#### 📄 Laudos Pendentes")
-        if df_pend_laudos is not None and not df_pend_laudos.empty:
-            laudos_aged, dist_laudos, stats_laudos = calculate_aging_analysis(df_pend_laudos)
-            col_a, col_b, col_c = st.columns(3)
-            with col_a: st.metric("Total", format_number(stats_laudos.get("total", 0)))
-            with col_b: st.metric("Críticos", stats_laudos.get("criticos", 0))
-            with col_c: st.metric("Média (dias)", format_number(stats_laudos.get("media_dias", 0), 1))
-            if not dist_laudos.empty:
-                fig_aging_laudos = px.bar(
-                    x=dist_laudos.index, y=dist_laudos.values, title="Distribuição por Tempo de Pendência",
-                    color=dist_laudos.values, color_continuous_scale="Reds", text=dist_laudos.values
-                )
-                fig_aging_laudos.update_traces(texttemplate='%{text}', textposition='outside')
-                fig_aging_laudos.update_layout(height=350, showlegend=False, xaxis_title="Faixa de Dias", yaxis_title="Quantidade")
-                st.plotly_chart(fig_aging_laudos, use_container_width=True)
+    st.markdown("#### 📄 Laudos Pendentes")
+    if df_pend_laudos is not None and not df_pend_laudos.empty:
+        # Forçar processamento correto das datas
+        df_laudos_temp = df_pend_laudos.copy()
+        
+        # Se data_base não existe ou está vazia, tentar criar
+        if 'data_base' not in df_laudos_temp.columns or df_laudos_temp['data_base'].isna().all():
+            if 'data_solicitacao' in df_laudos_temp.columns:
+                df_laudos_temp['data_base'] = pd.to_datetime(df_laudos_temp['data_solicitacao'], errors='coerce', dayfirst=True)
+        
+        laudos_aged, dist_laudos, stats_laudos = calculate_aging_analysis(df_laudos_temp)
+        
+        # Mostrar métricas
+        col_a, col_b, col_c = st.columns(3)
+        with col_a: 
+            total_laudos = stats_laudos.get("total_com_data_valida", stats_laudos.get("total", 0))
+            st.metric("Total", format_number(total_laudos))
+        with col_b: 
+            criticos_laudos = stats_laudos.get("criticos", 0)
+            st.metric("Críticos", criticos_laudos)
+        with col_c: 
+            media_laudos = stats_laudos.get("media_dias", 0)
+            st.metric("Média (dias)", format_number(media_laudos, 1))
+        
+        # Verificar se há dados válidos para gráficos
+        if stats_laudos.get("total_com_data_valida", 0) > 0 and not dist_laudos.empty:
+            # Gráfico de distribuição
+            fig_aging_laudos = px.bar(
+                x=dist_laudos.index, y=dist_laudos.values, 
+                title="Distribuição por Tempo de Pendência",
+                color=dist_laudos.values, color_continuous_scale="Reds", 
+                text=dist_laudos.values
+            )
+            fig_aging_laudos.update_traces(texttemplate='%{text}', textposition='outside')
+            fig_aging_laudos.update_layout(height=350, showlegend=False, 
+                                         xaxis_title="Faixa de Dias", yaxis_title="Quantidade")
+            st.plotly_chart(fig_aging_laudos, use_container_width=True)
+            
+            # Gráfico de prioridade
             if "prioridade" in laudos_aged.columns:
                 prioridade_dist = laudos_aged["prioridade"].value_counts()
-                fig_prioridade = px.pie(values=prioridade_dist.values, names=prioridade_dist.index,
-                                        title="Distribuição por Prioridade",
-                                        color_discrete_map={"Normal": "green", "Atenção": "yellow", "Urgente": "orange", "Crítico": "red"})
-                fig_prioridade.update_layout(height=300)
-                st.plotly_chart(fig_prioridade, use_container_width=True)
+                if not prioridade_dist.empty:
+                    fig_prioridade = px.pie(values=prioridade_dist.values, names=prioridade_dist.index,
+                                          title="Distribuição por Prioridade",
+                                          color_discrete_map={"Normal": "green", "Atenção": "yellow", 
+                                                            "Urgente": "orange", "Crítico": "red"})
+                    fig_prioridade.update_layout(height=300)
+                    st.plotly_chart(fig_prioridade, use_container_width=True)
+            
+            # Top 10 mais antigas
             st.markdown("**🔴 Top 10 Mais Antigas:**")
             if "dias_pendentes" in laudos_aged.columns:
-                display_cols = [c for c in ["id", "unidade", "tipo", "dias_pendentes", "prioridade"] if c in laudos_aged.columns]
-                oldest = laudos_aged.nlargest(10, "dias_pendentes")[display_cols] if display_cols else laudos_aged.nlargest(10, "dias_pendentes")
-                st.dataframe(oldest, use_container_width=True, height=250)
+                # Selecionar colunas para exibição
+                display_cols = []
+                for col in ["id", "caso_sirsaelp", "unidade", "tipo", "tipopericia", "dias_pendentes", "prioridade"]:
+                    if col in laudos_aged.columns:
+                        display_cols.append(col)
+                
+                if display_cols and laudos_aged["dias_pendentes"].notna().sum() > 0:
+                    oldest = laudos_aged.nlargest(10, "dias_pendentes")[display_cols]
+                    st.dataframe(oldest, use_container_width=True, height=250)
+                else:
+                    st.info("Não há dados de aging válidos para exibir.")
         else:
-            st.info("Sem dados de laudos pendentes disponíveis.")
+            st.warning(f"⚠️ Problema no processamento das datas dos laudos pendentes.")
+            if "erro" in stats_laudos:
+                st.error(stats_laudos["erro"])
+            st.info(f"Registros carregados: {stats_laudos.get('total', 0)}")
+            st.info(f"Registros com data válida: {stats_laudos.get('total_com_data_valida', 0)}")
+            
+    else:
+        st.info("Sem dados de laudos pendentes disponíveis.")
 
     with col2:
         st.markdown("#### 🔬 Exames Pendentes")
