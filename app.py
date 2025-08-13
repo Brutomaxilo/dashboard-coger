@@ -1,6 +1,7 @@
 import io
 import os
 import re
+import unicodedata
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple, List
 
@@ -215,37 +216,53 @@ file_configs.update({
     }
 })
 
+def file_exists_in_data(name: str) -> bool:
+    return resolve_file_path(name) is not None
+
 uploads = {}
 for key, config in file_configs.items():
-    if not has_data_dir:
-        uploads[key] = st.sidebar.file_uploader(
-            f"{config['label']} (.csv)",
-            help=config['description'],
-            key=f"upload_{key}"
-        )
-    else:
-        uploads[key] = None
+    needs_upload = (not has_data_dir) or (has_data_dir and not file_exists_in_data(key))
+    uploads[key] = st.sidebar.file_uploader(
+        f"{config['label']} (.csv)" + (" — (faltando)" if needs_upload else " — (encontrado em data/ )"),
+        help=config['description'],
+        key=f"upload_{key}"
+    ) if needs_upload else None
 
 # ============ RESOLUÇÃO DE ARQUIVOS ============
+# ============ RESOLUÇÃO DE ARQUIVOS (robusta) ============
+def _normalize_filename(s: str) -> str:
+    # remove acentos
+    s = ''.join(ch for ch in unicodedata.normalize('NFKD', s) if not unicodedata.combining(ch))
+    s = s.lower().strip()
+    s = os.path.splitext(s)[0]
+    # remove sufixo " (n)" no fim
+    s = re.sub(r"\s*\(\d+\)\s*$", "", s)
+    # troca qualquer coisa não alfanum por _
+    s = re.sub(r"[^\w]+", "_", s)
+    # compacta múltiplos _
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s
+
 def resolve_file_path(name: str) -> Optional[str]:
-    """Resolve caminho do arquivo com tolerância a variações de nome."""
+    """Resolve caminho do arquivo na pasta data/ com tolerância a nomes."""
     if not os.path.exists("data"):
         return None
 
     config = file_configs.get(name, {})
-    patterns = config.get("pattern", [name.lower().replace(" ", "_")])
+    patterns = list(config.get("pattern", []))
+    # inclui o nome canônico
     patterns.append(name.lower().replace(" ", "_"))
+    patterns_norm = {_normalize_filename(p) for p in patterns}
 
     for filename in os.listdir("data"):
         if not filename.lower().endswith(".csv"):
             continue
-        base_name = os.path.splitext(filename)[0].lower()
-        normalized_name = re.sub(r"[^\w]", "_", base_name)
-        for pattern in patterns:
-            if pattern in normalized_name or normalized_name.startswith(pattern):
-                return os.path.join("data", filename)
+        norm = _normalize_filename(filename)
+        if any(norm == pat or norm.startswith(pat) for pat in patterns_norm):
+            return os.path.join("data", filename)
 
     return None
+
 
 # ============ DADOS SIMULADOS PARA DEMO ============
 def create_sample_laudos_realizados() -> pd.DataFrame:
@@ -420,15 +437,11 @@ def standardize_dataframe(name: str, df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
 
     # Quantidade
-    if name in ["Atendimentos_todos_Mensal", "Laudos_todos_Mensal",
-                "Atendimentos_especifico_Mensal", "Laudos_especifico_Mensal",
-                "Atendimentos_diario", "Laudos_diario"]:
-        quantity_col = mapping.get("quantidade", mapping.get("id"))
-        if quantity_col and quantity_col in result.columns:
-            result["quantidade"] = pd.to_numeric(result[quantity_col], errors="coerce").fillna(1)
-        else:
-            result["quantidade"] = 1
+    count_candidates = [c for c in ["quantidade","total","qtd","qtde","count","n"] if c in result.columns]
+    if count_candidates:
+        result["quantidade"] = pd.to_numeric(result[count_candidates[0]], errors="coerce").fillna(0)
     else:
+        # se houver id, NÃO some o id — cada linha vale 1
         result["quantidade"] = 1
 
     # Dimensões
@@ -532,7 +545,44 @@ processing_info = []
 for name, df in raw_dataframes.items():
     standardized_df = standardize_dataframe(name, df)
     standardized_dfs[name] = standardized_df
+# === PASSO 4: Fallback para Laudos_todos_Mensal a partir de laudos_realizados ===
+need_fallback = ("Laudos_todos_Mensal" not in standardized_dfs) or standardized_dfs["Laudos_todos_Mensal"].empty
+has_lr = ("laudos_realizados" in standardized_dfs) and (standardized_dfs["laudos_realizados"] is not None) and not standardized_dfs["laudos_realizados"].empty
 
+if need_fallback and has_lr:
+    base = standardized_dfs["laudos_realizados"].copy()
+
+    # Garante presença de anomês_dt
+    if "anomês_dt" not in base.columns:
+        if "ano" in base.columns and "mes" in base.columns:
+            anos = pd.to_numeric(base["ano"], errors="coerce")
+            meses = pd.to_numeric(base["mes"], errors="coerce")
+            base["anomês_dt"] = pd.to_datetime({'year': anos, 'month': meses, 'day': 1}, errors="coerce")
+
+    base = base.dropna(subset=["anomês_dt"])
+
+    # Dimensões que conseguiremos manter (se existirem em laudos_realizados)
+    dims = ["anomês_dt"]
+    for c in ["unidade", "diretoria", "tipo"]:
+        if c in base.columns:
+            dims.append(c)
+
+    # Agrega e cria campos padrão
+    synth = (base.groupby(dims, as_index=False)["quantidade"].sum())
+    synth["anomês"] = synth["anomês_dt"].dt.strftime("%Y-%m")
+    synth["ano"] = synth["anomês_dt"].dt.year
+    synth["mes"] = synth["anomês_dt"].dt.month
+
+    # Registra dataset sintetizado
+# === PRO: Padronização com período seguro ===
+standardized_dfs = {}
+processing_info = []
+
+for name, df in raw_dataframes.items():
+    standardized_df = standardize_dataframe(name, df)
+    standardized_dfs[name] = standardized_df
+
+    # — resumo por arquivo (fica DENTRO do for) —
     if "anomês" in standardized_df.columns and standardized_df["anomês"].notna().any():
         anomes_drop = standardized_df["anomês"].dropna()
         periodo_txt = f"{anomes_drop.min()} a {anomes_drop.max()}"
@@ -544,6 +594,49 @@ for name, df in raw_dataframes.items():
         "Linhas": len(standardized_df),
         "Período": periodo_txt
     })
+
+# === PASSO 4: Fallback para Laudos_todos_Mensal a partir de laudos_realizados ===
+need_fallback = ("Laudos_todos_Mensal" not in standardized_dfs) or standardized_dfs["Laudos_todos_Mensal"].empty
+has_lr = ("laudos_realizados" in standardized_dfs) and (standardized_dfs["laudos_realizados"] is not None) and not standardized_dfs["laudos_realizados"].empty
+
+if need_fallback and has_lr:
+    base = standardized_dfs["laudos_realizados"].copy()
+
+    # Garante presença de anomês_dt
+    if "anomês_dt" not in base.columns:
+        if "ano" in base.columns and "mes" in base.columns:
+            anos = pd.to_numeric(base["ano"], errors="coerce")
+            meses = pd.to_numeric(base["mes"], errors="coerce")
+            base["anomês_dt"] = pd.to_datetime({'year': anos, 'month': meses, 'day': 1}, errors="coerce")
+
+    base = base.dropna(subset=["anomês_dt"])
+
+    # Mantém dimensões se existirem (ajuda nas análises por diretoria/unidade)
+    dims = ["anomês_dt"]
+    for c in ["unidade", "diretoria", "tipo"]:
+        if c in base.columns:
+            dims.append(c)
+
+    # Agrega e cria campos padrão
+    synth = (base.groupby(dims, as_index=False)["quantidade"].sum())
+    synth["anomês"] = synth["anomês_dt"].dt.strftime("%Y-%m")
+    synth["ano"] = synth["anomês_dt"].dt.year
+    synth["mes"] = synth["anomês_dt"].dt.month
+
+    # Registra dataset sintetizado
+    standardized_dfs["Laudos_todos_Mensal"] = synth
+    raw_dataframes["Laudos_todos_Mensal"] = synth  # para aparecer no DEBUG
+
+    # Atualiza o quadro de processamento para o resumo lateral
+    periodo_txt = "Sem dados temporais" if synth.empty else f"{synth['anomês'].min()} a {synth['anomês'].max()}"
+    processing_info.append({
+        "Arquivo": "Laudos_todos_Mensal (sintetizado)",
+        "Linhas": len(synth),
+        "Período": periodo_txt
+    })
+
+    st.sidebar.warning("⚠️ 'Laudos_todos_Mensal' ausente — gerei versão sintetizada a partir de 'laudos_realizados'.")
+
 
 # Resumo na barra lateral
 with st.sidebar.expander("📊 Resumo dos Dados", expanded=False):
