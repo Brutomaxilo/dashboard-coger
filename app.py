@@ -616,32 +616,6 @@ df_pend_exames = filtered_dfs.get("detalhes_examespendentes")
 df_atend_diario = filtered_dfs.get("Atendimentos_diario")
 df_laudos_diario = filtered_dfs.get("Laudos_diario")
 
-# === DEBUG TEMPORÁRIO ===
-st.sidebar.markdown("### 🔧 Debug Final")
-if df_pend_laudos is not None:
-    st.sidebar.write(f"📊 Laudos pendentes carregados: {len(df_pend_laudos)}")
-    st.sidebar.write(f"📅 Colunas: {list(df_pend_laudos.columns)}")
-    
-    # Verificar coluna data_solicitacao especificamente
-    if 'data_solicitacao' in df_pend_laudos.columns:
-        valores_nao_nulos = df_pend_laudos['data_solicitacao'].notna().sum()
-        st.sidebar.write(f"🗓️ data_solicitacao: {valores_nao_nulos} valores não nulos")
-        if valores_nao_nulos > 0:
-            amostra = df_pend_laudos['data_solicitacao'].dropna().head(3).tolist()
-            st.sidebar.write(f"📝 Amostra: {amostra}")
-    
-    # Testar conversão de data
-    if 'data_solicitacao' in df_pend_laudos.columns:
-        try:
-            datas_convertidas = pd.to_datetime(df_pend_laudos['data_solicitacao'], errors='coerce', dayfirst=True)
-            validas = datas_convertidas.notna().sum()
-            st.sidebar.write(f"✅ Datas convertidas com sucesso: {validas}")
-        except Exception as e:
-            st.sidebar.error(f"❌ Erro na conversão: {str(e)}")
-else:
-    st.sidebar.error("❌ df_pend_laudos é None")
-# === FIM DEBUG ===
-
 # ============ CÁLCULOS DE KPIs ============
 def calculate_total(df: pd.DataFrame) -> int:
     if df is None or df.empty or "quantidade" not in df.columns:
