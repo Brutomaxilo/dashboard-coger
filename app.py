@@ -60,8 +60,6 @@ with colh2:
       <div class="kpi-card" style="padding:8px 10px;"><span class="kpi-title">Atualizado</span><div class="kpi-value" style="font-size:16px;">{datetime.now().strftime("%d/%m/%Y %H:%M")}</div></div>
     </div>
    """, unsafe_allow_html=True)
-                
-                # Layout com duas colunas para mostrar ambos
 st.markdown("<hr/>", unsafe_allow_html=True)
 
 
@@ -1244,7 +1242,9 @@ st.markdown(f"""
     <p>Para suporte técnico ou sugestões: <strong>victor.poubel@policiacientifica.sc.gov.br</strong></p>
     <p><em>Última atualização: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</em></p>
 </div>
-""", unsafe_allow_html=True) Layout com duas colunas para mostrar ambos
+""", unsafe_allow_html=True)
+                
+                # Layout com duas colunas para mostrar ambos
                 prod_col1, prod_col2 = st.columns(2)
                 
                 with prod_col1:
