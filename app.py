@@ -59,7 +59,9 @@ with colh2:
       <div class="kpi-card" style="padding:8px 10px;"><span class="kpi-title">Versão</span><div class="kpi-value" style="font-size:16px;">2.2</div></div>
       <div class="kpi-card" style="padding:8px 10px;"><span class="kpi-title">Atualizado</span><div class="kpi-value" style="font-size:16px;">{datetime.now().strftime("%d/%m/%Y %H:%M")}</div></div>
     </div>
-    """, unsafe_allow_html=True)
+   """, unsafe_allow_html=True)
+                
+                # Layout com duas colunas para mostrar ambos
 st.markdown("<hr/>", unsafe_allow_html=True)
 
 
