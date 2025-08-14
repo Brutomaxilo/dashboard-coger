@@ -1376,22 +1376,6 @@ with dir_col2:
 
 st.markdown("---")
 
-# ============ PREPARAÇÃO DE DADOS PARA PERITOS ============
-peritos_datasets = {}
-if df_laudos_real is not None and "perito" in df_laudos_real.columns:
-    peritos_datasets["laudos_realizados"] = df_laudos_real
-if df_pend_laudos is not None and "perito" in df_pend_laudos.columns:
-    peritos_datasets["laudos_pendentes"] = df_pend_laudos
-if df_pend_exames is not None and "perito" in df_pend_exames.columns:
-    peritos_datasets["exames_pendentes"] = df_pend_exames
-
-# Extrair lista de peritos para uso geral
-todos_peritos = set()
-for df in peritos_datasets.values():
-    if "perito" in df.columns:
-        peritos_df = df["perito"].dropna().astype(str).unique()
-        todos_peritos.update(p for p in peritos_df if p and p.lower() not in ["nan", "none", ""])
-
 # ============ ABAS ============ 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
 
